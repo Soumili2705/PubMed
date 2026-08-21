@@ -5,8 +5,12 @@
 [![NCBI Entrez](https://img.shields.io/badge/NCBI-PubMed%20E--Utilities-326CE5.svg?style=for-the-badge)](https://eutils.ncbi.nlm.nih.gov/)
 [![HuggingFace](https://img.shields.io/badge/MiniLM--L6-384--dim%20Dense%20Embeddings-FFD21E.svg?style=for-the-badge&logo=huggingface&logoColor=black)](https://huggingface.co/)
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://share.streamlit.io/deploy?repository=Soumili2705/PubMed&branch=main&mainModule=app.py)
+
 > **Knowway AI — Find your knowledge in the right way.**  
 > *Turn complex research questions into relevant, evidence-backed literature — so researchers spend less time searching and more time discovering.*
+
+🔗 **1-Click Live Deployment**: Click the badge above or deploy directly at [share.streamlit.io](https://share.streamlit.io/deploy?repository=Soumili2705/PubMed&branch=main&mainModule=app.py).
 
 ---
 
