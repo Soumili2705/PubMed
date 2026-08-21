@@ -1,151 +1,257 @@
-"""
-Knowway AI — UI Components Module.
-Story-driven biomedical research interface: ASK → UNDERSTAND → DISCOVER → TRUST → ACT.
-"""
+"""Knowway AI — UI Components. ASK → UNDERSTAND → DISCOVER → TRUST → ACT."""
 from __future__ import annotations
 import html
 import streamlit as st
 
+
+# ─────────────────────────────────────────────────────────────────
+# HERO HEADER — Navy version (kept as primary visual anchor)
+# ─────────────────────────────────────────────────────────────────
 def render_hero_header():
-  """Renders the Google AI Studio-inspired top banner."""
-  st.markdown("""<div class="studio-top-header">
-<div class="studio-logo-group">
-  <div class="studio-logo-icon">🧬</div>
+    st.markdown("""<div class="kw-hero">
+  <div class="kw-hero-left">
+    <div class="kw-hero-icon">🧬</div>
+    <div>
+      <div class="kw-hero-title">Knowway AI<span class="kw-hero-badge">Biomedical Discovery</span></div>
+      <div class="kw-hero-sub">Find your knowledge in the right way. · Biomedical Literature Intelligence</div>
+    </div>
+  </div>
+  <div class="kw-pipe">
+    <span class="kw-pipe-step">ASK</span>
+    <span class="kw-pipe-arrow">→</span>
+    <span class="kw-pipe-step">UNDERSTAND</span>
+    <span class="kw-pipe-arrow">→</span>
+    <span class="kw-pipe-step">DISCOVER</span>
+    <span class="kw-pipe-arrow">→</span>
+    <span class="kw-pipe-step">TRUST</span>
+    <span class="kw-pipe-arrow">→</span>
+    <span class="kw-pipe-step">ACT</span>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────────
+# INTRO CARD — Live NCBI PubMed + 3 knowledge feature cards
+# ─────────────────────────────────────────────────────────────────
+def render_intro_card():
+    st.markdown("""<div class="kw-card">
+  <div class="kw-eyebrow">LIVE EVIDENCE DISCOVERY</div>
+  <div class="kw-intro-title">From research question to verified evidence.</div>
+  <p class="kw-intro-desc">
+    Search live PubMed literature with <strong>MeSH-informed retrieval</strong> and semantic ranking.
+    Every result keeps its PMID, so the evidence remains easy to verify.
+  </p>
+  <div class="kw-features">
+    <div class="kw-feature">
+      <div class="kw-feature-title">Understand</div>
+      <p class="kw-feature-text">Maps clinical language into searchable concepts.</p>
+    </div>
+    <div class="kw-feature">
+      <div class="kw-feature-title">Retrieve</div>
+      <p class="kw-feature-text">Finds live PubMed records with verified PMIDs.</p>
+    </div>
+    <div class="kw-feature">
+      <div class="kw-feature-title">Prioritize</div>
+      <p class="kw-feature-text">Ranks abstracts by estimated semantic relevance.</p>
+    </div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────────
+# UNDERSTOOD SECTION
+# ─────────────────────────────────────────────────────────────────
+def _derive_intent(query: str, mesh_terms: list, clinical_terms: list) -> str:
+    q = query.lower()
+    tags = []
+    if any(w in q for w in ["early", "detection", "biomarker", "screen"]):
+        tags.append("Early Detection & Biomarkers")
+    if any(w in q for w in ["treatment", "therapy", "trial", "efficacy", "drug"]):
+        tags.append("Therapeutic Efficacy")
+    if any(w in q for w in ["guideline", "management", "acute", "protocol"]):
+        tags.append("Clinical Management")
+    if any(w in q for w in ["mechanism", "pathophysiology", "pathway", "damage"]):
+        tags.append("Pathophysiology")
+    return " · ".join(tags) if tags else (
+        f"{mesh_terms[0]} Investigation" if mesh_terms else "Literature Investigation"
+    )
+
+
+def render_understood_section(query, mesh_terms, clinical_terms, facets=None, pubmed_query=None):
+    seen, unique = set(), []
+    for t in mesh_terms + clinical_terms:
+        if t.lower() not in seen and len(t.strip()) > 1:
+            seen.add(t.lower()); unique.append(t)
+    if not unique:
+        unique = [w.capitalize() for w in query.split() if len(w) > 3][:5]
+
+    visible, hidden_count = unique[:8], max(0, len(unique) - 8)
+    tags = "".join(f"<span class='kw-tag'>🏷 {html.escape(c)}</span>" for c in visible)
+    if hidden_count:
+        tags += f"<span class='kw-tag'>+{hidden_count} more</span>"
+    intent = (facets or {}).get("intent") or _derive_intent(query, mesh_terms, clinical_terms)
+
+    facet_html = ""
+    if facets:
+        chips = []
+        for key, label in [
+            ("condition", "Condition"),
+            ("intervention_or_biomarker", "Biomarker/Tool"),
+            ("population", "Population"),
+            ("outcome_or_intent", "Outcome"),
+        ]:
+            if facets.get(key):
+                chips.append(
+                    f"<span class='kw-facet'><strong>{label}:</strong>&nbsp;"
+                    f"{html.escape(str(facets[key]))}</span>"
+                )
+        if chips:
+            facet_html = f"<div style='margin-top:7px;'>{''.join(chips)}</div>"
+
+    query_html = ""
+    if pubmed_query:
+        query_html = (
+            f"<div style='margin-top:9px;background:rgba(255,255,255,0.80);"
+            f"border:1px solid rgba(203,213,225,0.65);border-radius:8px;padding:6px 11px;'>"
+            f"<span style='font-size:10px;font-weight:700;color:#64748B;text-transform:uppercase;"
+            f"letter-spacing:0.07em;'>📡 Generated PubMed Boolean</span><br>"
+            f"<code style='font-size:11.5px;color:#1D4ED8;word-break:break-all;"
+            f"font-family:var(--mono);'>{html.escape(pubmed_query)}</code></div>"
+        )
+
+    st.markdown(f"""<div class="kw-understood">
+<div class="kw-understood-title">✅ We Understood Your Research Focus</div>
+<div style="margin-bottom:5px;">{tags}</div>
+{facet_html}
+<div style="font-size:12.5px;color:#334155;margin-top:9px;">
+  <strong>🎯 Inferred Intent:</strong><span class="kw-intent">{html.escape(intent)}</span>
+</div>
+{query_html}
+</div>""", unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────────
+# PAPER CARD
+# ─────────────────────────────────────────────────────────────────
+def _why_matches(paper: dict, concepts: list) -> str:
+    text = (paper.get("title", "") + " " + paper.get("abstract", "")).lower()
+    matched = [c for c in concepts if c.lower() in text]
+    if not matched:
+        for tok in ["biomarker","trial","therapy","clinical","mechanism","cohort","pediatric","elderly"]:
+            if tok in text: matched.append(tok.capitalize())
+    return " · ".join(matched[:4]) if matched else "Direct semantic alignment with study concepts & endpoints"
+
+
+def render_paper_card(paper: dict, index: int, all_concepts: list | None = None):
+    c        = all_concepts or []
+    score    = paper.get("raw_score", paper.get("similarity_score", 0.0))
+    pmid     = paper.get("pmid", "N/A")
+    title    = paper.get("title", "Untitled")
+    journal  = paper.get("journal", "PubMed Indexed")
+    year     = str(paper.get("year", "Recent"))
+    author   = paper.get("author", "")
+    abstract = paper.get("abstract", "No abstract available.")
+    url      = (f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+                if pmid != "N/A" else "https://pubmed.ncbi.nlm.nih.gov/")
+    why      = _why_matches(paper, c)
+    rel      = ("🟢 High Relevance" if score >= 0.65
+                else ("🟡 Moderate Relevance" if score >= 0.45 else "⚪ Baseline Relevance"))
+    auth_chip = f'<span class="kw-chip">👤 {html.escape(author)}</span>' if author else ""
+
+    st.markdown(f"""<div class="kw-paper">
+  <span class="kw-paper-rank">#{index}</span>
+  <a href="{url}" target="_blank" class="kw-paper-title">{html.escape(title)}</a>
+  <div class="kw-why"><span class="kw-why-lbl">💡 Why this matches:</span>{html.escape(why)}</div>
   <div>
-    <h1 class="studio-title-main">Knowway AI <span class="studio-badge-sub">Biomedical Discovery</span></h1>
-    <p class="studio-tagline">Find your knowledge in the right way.</p>
+    <span class="kw-sim">{rel} &nbsp;·&nbsp; <span class="kw-sim-score">Semantic Relevance {score:.3f}</span></span>
+    <span class="kw-chip">📚 {html.escape(journal)}</span>
+    <span class="kw-chip">📅 {html.escape(year)}</span>
+    {auth_chip}
+    <span class="kw-chip">🆔 PMID {pmid}</span>
   </div>
-</div>
-<div class="studio-pipeline-pill">
-  <span>🧭 Path:</span>
-  <span style="color:#2563EB;">ASK</span> ➔ <span style="color:#0D9488;">UNDERSTAND</span> ➔ <span style="color:#4F46E5;">DISCOVER</span> ➔ <span style="color:#059669;">TRUST</span> ➔ <span style="color:#0F172A; font-weight:700;">ACT</span>
-</div>
 </div>""", unsafe_allow_html=True)
 
-
-def derive_research_intent(query: str, mesh_terms: list, clinical_terms: list) -> str:
-  """Derives concise, honest research intent label from query concepts."""
-  q = query.lower()
-  intents = []
-  if any(w in q for w in ["early", "detection", "detect", "biomarker", "screen"]): intents.append("Early Detection & Biomarkers")
-  if any(w in q for w in ["treatment", "therapy", "trial", "efficacy", "drug", "inhibitor"]): intents.append("Therapeutic Efficacy & Clinical Trials")
-  if any(w in q for w in ["guideline", "management", "acute", "protocol"]): intents.append("Clinical Management & Guidelines")
-  if any(w in q for w in ["mechanism", "pathophysiology", "pathway", "damage", "cause"]): intents.append("Pathophysiology & Disease Progression")
-  return " · ".join(intents) if intents else (f"{mesh_terms[0]} Investigation" if mesh_terms else "Targeted Literature Investigation")
+    citation = f"{author + ' ' if author else ''}{title}. {journal} ({year}). PMID: {pmid}."
+    with st.expander(f"📖 Abstract & Citation — #{index} · PMID {pmid}"):
+        st.markdown(f"**Abstract:**\n\n{abstract}\n\n---\n**Citation:** `{citation}`")
+        st.link_button("🔗 View on PubMed", url, use_container_width=True)
 
 
-def render_understood_section(query: str, mesh_terms: list, clinical_terms: list):
-  """Renders the '1. WE UNDERSTOOD YOUR QUESTION' concept understanding card."""
-  unique = []
-  seen = set()
-  for t in mesh_terms + clinical_terms:
-    if t.lower() not in seen and len(t.strip()) > 1:
-      seen.add(t.lower()); unique.append(t)
-  if not unique: unique = [w.capitalize() for w in query.split() if len(w) > 3][:4]
-  tags_html = "".join([f"<span class='concept-tag'>🏷️ {html.escape(c)}</span>" for c in unique])
-  intent = derive_research_intent(query, mesh_terms, clinical_terms)
-  st.markdown(f"""<div class="understood-box">
-<div class="understood-header">1. We Understood Your Research Focus</div>
-<div style="margin-bottom:8px;">{tags_html}</div>
-<div style="font-size:13px; color:#475569; margin-top:8px;"><strong>🎯 Inferred Intent:</strong> <span class="intent-tag">{html.escape(intent)}</span></div>
-</div>""", unsafe_allow_html=True)
-
-
-def derive_why_this_matches(paper: dict, concepts: list[str]) -> str:
-  """Derives non-hallucinated 'Why this matches' explanation from paper abstract."""
-  text = (paper.get("title", "") + " " + paper.get("abstract", "")).lower()
-  matched = [c for c in concepts if c.lower() in text]
-  if not matched:
-    for tok in ["biomarker", "trial", "therapy", "clinical", "mechanism", "cohort", "pediatric", "elderly"]:
-      if tok in text: matched.append(tok.capitalize())
-  return " · ".join(matched[:4]) if matched else "Direct semantic alignment with inquiry concepts & study endpoints"
-
-
-def render_paper_card(paper: dict, index: int, all_concepts: list[str] | None = None):
-  """Renders a paper card: Title → Why this matches → Similarity → Metadata."""
-  concepts = all_concepts or []
-  raw_cosine = paper.get("raw_score", paper.get("similarity_score", 0.0))
-  pmid = paper.get("pmid", "N/A")
-  title, journal, year, author, abstract = paper.get("title", "Untitled"), paper.get("journal", "PubMed Indexed"), paper.get("year", "Recent"), paper.get("author", ""), paper.get("abstract", "No abstract available.")
-  url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid != "N/A" else "https://pubmed.ncbi.nlm.nih.gov/"
-  why = derive_why_this_matches(paper, concepts)
-  rel = "High relevance" if raw_cosine >= 0.65 else ("Moderate relevance" if raw_cosine >= 0.45 else "Baseline relevance")
-  author_chip = f'<span class="meta-chip-clean">👤 {html.escape(author)}</span>' if author else ""
-  
-  st.markdown(f"""<div class="paper-card-clean">
-<a href="{url}" target="_blank" class="paper-title-link">#{index}. {html.escape(title)}</a>
-<div class="why-matches-box"><span class="why-matches-label">💡 Why this matches:</span><span>{html.escape(why)}</span></div>
-<div style="margin-bottom:6px;">
-  <span class="sim-badge">🎯 {rel} · <span class="sim-badge-score">{raw_cosine:.3f} similarity</span></span>
-  <span class="meta-chip-clean">📚 {html.escape(journal)}</span>
-  <span class="meta-chip-clean">📅 {html.escape(str(year))}</span>
-  {author_chip}
-  <span class="meta-chip-clean">🆔 PMID: {pmid}</span>
-</div>
-</div>""", unsafe_allow_html=True)
-  
-  citation = f"{author + ' ' if author else ''}{title}. {journal} ({year}). PMID: {pmid}."
-  with st.expander(f"📖 Read Full Abstract & Citation for #{index} (PMID {pmid})"):
-    st.markdown(f"**Abstract:**\n\n{abstract}\n\n---\n**APA Citation:** `{citation}`")
-    st.link_button("🔗 View on PubMed", url, use_container_width=True)
-
-
+# ─────────────────────────────────────────────────────────────────
+# RESEARCHER IMPACT
+# ─────────────────────────────────────────────────────────────────
 def render_researcher_impact():
-  """Renders the value-oriented story section."""
-  st.markdown("""<div style="background:var(--bg-card); border:1px solid var(--glass-border); border-radius:16px; padding:20px 24px; margin:22px 0;">
-<h4 style="margin:0 0 4px 0; font-size:16px; font-weight:800; color:#0F172A;">💡 Researcher Impact</h4>
-<p style="margin:0 0 12px 0; font-size:13px; color:#64748B;">How Knowway AI transforms scientific literature exploration:</p>
-<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">
-  <div style="background:rgba(255,255,255,0.6); border:1px solid #E2E8F0; border-radius:10px; padding:12px; text-align:center;">
-    <div style="font-size:11px; font-weight:700; color:#64748B; text-transform:uppercase;">Before</div>
-    <div style="font-size:12.5px; font-weight:600; color:#0F172A; margin-top:3px;">Hours of manual keyword & Boolean screening</div>
+    st.markdown("""<div class="kw-card" style="margin-top:16px;">
+<div style="font-size:10px;font-weight:700;letter-spacing:0.10em;text-transform:uppercase;
+color:var(--faint);margin-bottom:10px;">💡 Researcher Impact</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:9px;">
+  <div style="background:rgba(248,250,252,0.9);border:1px solid var(--border);border-radius:9px;
+  padding:12px;text-align:center;">
+    <div style="font-size:9.5px;font-weight:700;color:var(--faint);text-transform:uppercase;letter-spacing:.07em;">Before</div>
+    <div style="font-size:12.5px;font-weight:600;color:var(--ink);margin-top:4px;line-height:1.4;">Hours of manual keyword &amp; Boolean screening</div>
   </div>
-  <div style="background:#EFF6FF; border:1px solid #BFDBFE; border-radius:10px; padding:12px; text-align:center;">
-    <div style="font-size:11px; font-weight:700; color:#2563EB; text-transform:uppercase;">With Knowway AI</div>
-    <div style="font-size:12.5px; font-weight:600; color:#1E3A8A; margin-top:3px;">Concept-aware discovery + ranked evidence</div>
+  <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:9px;padding:12px;text-align:center;">
+    <div style="font-size:9.5px;font-weight:700;color:#1D4ED8;text-transform:uppercase;letter-spacing:.07em;">With Knowway AI</div>
+    <div style="font-size:12.5px;font-weight:600;color:#1E3A8A;margin-top:4px;line-height:1.4;">Concept-aware discovery + ranked evidence</div>
   </div>
-  <div style="background:#F0FDF4; border:1px solid #BBF7D0; border-radius:10px; padding:12px; text-align:center;">
-    <div style="font-size:11px; font-weight:700; color:#0D9488; text-transform:uppercase;">Outcome</div>
-    <div style="font-size:12.5px; font-weight:600; color:#14532D; margin-top:3px;">Faster discovery and more focused research</div>
+  <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:9px;padding:12px;text-align:center;">
+    <div style="font-size:9.5px;font-weight:700;color:#0D9488;text-transform:uppercase;letter-spacing:.07em;">Outcome</div>
+    <div style="font-size:12.5px;font-weight:600;color:#14532D;margin-top:4px;line-height:1.4;">Faster, more focused research decisions</div>
   </div>
 </div>
 </div>""", unsafe_allow_html=True)
 
 
+# ─────────────────────────────────────────────────────────────────
+# HOW IT WORKS
+# ─────────────────────────────────────────────────────────────────
 def render_how_it_works():
-  """Renders the architecture dropdown."""
-  with st.expander("⚙ How Knowway AI Works — Architecture & Retrieval Pipeline"):
-    st.markdown("""<div style="padding:6px 0; font-size:12.5px; color:#64748B; line-height:1.6;">
-<div style="font-size:13.5px; font-weight:600; color:#2563EB; margin-bottom:8px;">Question ➔ Concept Understanding ➔ PubMed Retrieval ➔ Semantic Ranking ➔ Evidence Synthesis</div>
-• <strong>Concept Understanding:</strong> Mapped against NLM MeSH ontology descriptors and clinical synonyms.<br>
-• <strong>PubMed Retrieval:</strong> NCBI Entrez API queries live PubMed repository records with title/abstract precision.<br>
-• <strong>Semantic Ranking:</strong> 384-dim dense vector embeddings calculate cosine similarities against intent.<br>
-• <strong>Evidence Synthesis:</strong> Groq LLaMA models generate concise briefings grounded in verified PMIDs.
+    with st.expander("⚙ How Knowway AI Works — Architecture & Scope"):
+        st.markdown("""<div style="font-size:13px;color:#475569;line-height:1.7;padding:4px 0;">
+<div style="font-size:13px;font-weight:700;color:#1D4ED8;margin-bottom:8px;">
+Question → Concept Understanding → PubMed Retrieval → Semantic Ranking → Evidence Synthesis
+</div>
+<b>Concept Understanding:</b> MeSH-informed concept mapping and clinical synonyms via PICO facet extraction.<br>
+<b>PubMed Retrieval:</b> NCBI Entrez API queries live PubMed repository records with title/abstract Boolean precision.<br>
+<b>Semantic Ranking:</b> 384-dim MiniLM dense vector embeddings calculate cosine similarities against research intent.<br>
+<b>Evidence Synthesis:</b> Groq LLaMA models generate concise briefings grounded in verified PMIDs.<br><br>
+<div style="font-size:11px;color:#64748B;border-top:1px solid #E2E8F0;padding-top:6px;">
+🛡 <em>Knowway AI accelerates literature discovery and triage; it does not replace researcher judgment or systematic clinical review.</em>
+</div>
 </div>""", unsafe_allow_html=True)
 
 
-def generate_dossier_markdown(query: str, translation: dict, papers: list, ai_report: str, latency: float, timings: dict | None = None) -> str:
-  """Generates structured literature dossier in clean Markdown for export."""
-  mesh_str, clinical_str = ", ".join(translation.get("mesh_terms", [])), ", ".join(translation.get("clinical_terms", []))
-  bool_query = translation.get("pubmed_query", "")
-  papers_md = "\n---\n".join([f"### {i}. {p.get('title')}\n- **Similarity**: {p.get('raw_score', p.get('similarity_score', 0.0)):.3f} | **Journal**: {p.get('journal', 'PubMed')} ({p.get('year', 'N/A')}) | **PMID**: [{p.get('pmid')}](https://pubmed.ncbi.nlm.nih.gov/{p.get('pmid')}/)\n- **Abstract Summary**: {p.get('abstract', '')[:350]}..." for i, p in enumerate(papers, 1)])
-  return f"""# 🧬 Evidence Dossier: {query}
-**Generated by Knowway AI**  
-*Pipeline Latency: {latency:.2f}s | Verified PubMed records*
+# ─────────────────────────────────────────────────────────────────
+# DOSSIER EXPORT
+# ─────────────────────────────────────────────────────────────────
+def generate_dossier_markdown(query, translation, papers, ai_report, latency, timings=None):
+    mesh_str     = ", ".join(translation.get("mesh_terms", []))
+    clinical_str = ", ".join(translation.get("clinical_terms", []))
+    bool_query   = translation.get("pubmed_query", "")
+    papers_md    = "\n---\n".join([
+        f"### {i}. {p.get('title')}\n"
+        f"- **Semantic Relevance**: {p.get('raw_score', p.get('similarity_score', 0.0)):.3f} | "
+        f"**Journal**: {p.get('journal','PubMed')} ({p.get('year','N/A')}) | "
+        f"**PMID**: [{p.get('pmid')}](https://pubmed.ncbi.nlm.nih.gov/{p.get('pmid')}/)\n"
+        f"- **Abstract Summary**: {p.get('abstract','')[:350]}..."
+        for i, p in enumerate(papers, 1)
+    ])
+    return f"""# 🧬 Evidence Dossier: {query}
+**Knowway AI** | Latency: {latency:.2f}s | PubMed-verified
 
 ---
-## 📋 Interpreted Research Focus
-- **Research Question**: {query}
-- **Concepts**: {mesh_str} | **Synonyms**: {clinical_str}
-- **PubMed Boolean Query**: `{bool_query}`
+## Research Focus
+- **Question**: {query}
+- **MeSH Terms**: {mesh_str}
+- **Clinical Synonyms**: {clinical_str}
+- **PubMed Boolean**: `{bool_query}`
 
 ---
-## 📝 Evidence Summary
+## Evidence Summary
 {ai_report}
 
 ---
-## 📚 Discovered Literature ({len(papers)} Studies)
+## Discovered Literature ({len(papers)} studies)
 {papers_md}
 
 *Knowway AI — Find your knowledge in the right way.*"""
-

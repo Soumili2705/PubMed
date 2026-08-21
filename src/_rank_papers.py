@@ -8,7 +8,13 @@ import streamlit as st
 @st.cache_resource(show_spinner="🧬 Loading 384-dim Dense Vector Model...")
 def get_embedding_model():
   """Loads and caches the all-MiniLM-L6-v2 model for instant vector inference."""
-  return SentenceTransformer("all-MiniLM-L6-v2")
+  model = SentenceTransformer("all-MiniLM-L6-v2")
+  try:
+    # Warmup pass to eliminate first-query cold-start latency
+    model.encode(["Biomedical literature warmup query"])
+  except Exception:
+    pass
+  return model
 
 
 def rank_papers(
@@ -35,7 +41,7 @@ def rank_papers(
     title = p.get("title", "Untitled Study")
     abstract = p.get("abstract", "")
     paper_texts.append(
-        f"Title: {title}. Focus: {clinical_context}. Abstract: {abstract}"
+        f"Title: {title}. Abstract: {abstract}"
     )
 
   paper_embeddings = model.encode(paper_texts)

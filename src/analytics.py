@@ -1,6 +1,6 @@
 """
-Analytics and Visualizations module for PubMed AI (Knowway Design System).
-Renders vector cosine similarity distributions, ontology co-occurrence, and pipeline latency breakdowns.
+Analytics and Visualizations module for Knowway AI.
+Renders semantic vector cosine similarity distributions, ontology co-occurrence, and pipeline latency breakdowns.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def render_analytics_dashboard(
   col_left, col_right = st.columns(2)
 
   with col_left:
-    st.markdown("#### 🎯 Vector Similarity Distribution")
+    st.markdown("#### 🎯 Semantic Similarity Distribution")
     # Honest raw cosine similarity scores
     scores = [
         round(p.get("raw_score", p.get("similarity_score", 0.0)), 3)
@@ -53,7 +53,7 @@ def render_analytics_dashboard(
                   x=[f"#{i}" for i in range(1, len(papers) + 1)],
                   y=scores,
                   hovertext=[
-                      f"<b>{t}</b><br>PMID: {p}<br>Similarity: {s:.3f}"
+                      f"<b>{t}</b><br>PMID: {p}<br>Semantic Similarity: {s:.3f}"
                       for t, p, s in zip(titles, pmids, scores)
                   ],
                   hoverinfo="text",
@@ -71,13 +71,15 @@ def render_analytics_dashboard(
           margin=dict(l=20, r=20, t=30, b=20),
           xaxis=dict(title="Retrieved Studies (Ranked)", showgrid=False),
           yaxis=dict(
-              title="Cosine Similarity", range=[0, 1.0], gridcolor="#F1F5F9"
+              title="Semantic Similarity (Cosine)",
+              range=[0, 1.0],
+              gridcolor="#F1F5F9",
           ),
           height=320,
       )
       st.plotly_chart(fig_scores, use_container_width=True)
     else:
-      st.bar_chart({"Cosine Similarity": scores})
+      st.bar_chart({"Semantic Similarity": scores})
 
   with col_right:
     st.markdown("#### ⏱️ Pipeline Latency Breakdown")

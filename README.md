@@ -13,7 +13,7 @@
 ## 🌟 The Product Story: ASK ➔ UNDERSTAND ➔ DISCOVER ➔ TRUST ➔ ACT
 
 1. **ASK**: The researcher inputs a complex natural-language inquiry (e.g. *"early detection biomarkers in Alzheimer's disease"*).
-2. **UNDERSTAND**: Knowway extracts standardized **NIH MeSH descriptors** and clinical synonyms to infer the core research intent.
+2. **UNDERSTAND**: Knowway uses **MeSH-informed concept mapping** and clinical synonyms to infer the core research intent.
 3. **DISCOVER**: NCBI PubMed retrieves candidate trials and dense vector embeddings re-rank abstracts by conceptual alignment.
 4. **TRUST**: Every paper features a concise **"Why this matches"** breakdown and honest vector cosine similarity metrics, grounded in verified PMIDs.
 5. **ACT**: Researchers can explore literature, read query-dependent evidence summaries, inspect visual analytics, and interact with papers via RAG Q&A.
@@ -26,7 +26,7 @@
 User Research Question 
           │
           ▼
-[ 1. Concept Understanding ]  ──► NLM MeSH Ontology & Clinical Synonyms
+[ 1. Concept Understanding ]  ──► MeSH-Informed Mapping & Clinical Synonyms
           │
           ▼
 [ 2. PubMed Retrieval ]       ──► NCBI ESearch & EFetch Live Records
@@ -63,4 +63,3 @@ NCBI_EMAIL=your_email@domain.com
 ```bash
 streamlit run app.py
 ```
-

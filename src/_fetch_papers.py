@@ -1,11 +1,17 @@
 from __future__ import annotations
 import xml.etree.ElementTree as ET
+import os
 import requests
+import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
 
 PUBMED_SEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 PUBMED_FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
 def search_pubmed(query: str, max_results: int = 15) -> list[str]:
   """Searches NCBI ESearch using the MeSH-expanded Boolean query."""
   params = {
@@ -13,7 +19,10 @@ def search_pubmed(query: str, max_results: int = 15) -> list[str]:
       "term": query,
       "retmode": "json",
       "retmax": max_results,
+      "sort": "relevance",
   }
+  if email := os.getenv("NCBI_EMAIL"):
+    params["email"] = email
   try:
     response = requests.get(PUBMED_SEARCH_URL, params=params, timeout=30)
     response.raise_for_status()
@@ -24,12 +33,15 @@ def search_pubmed(query: str, max_results: int = 15) -> list[str]:
     return []
 
 
-def fetch_papers(pmids: list[str]) -> list[dict]:
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_papers_cached(pmids: tuple[str, ...]) -> list[dict]:
   """Fetches XML records from NCBI EFetch and parses titles, abstracts, journals, and publication year."""
   if not pmids:
     return []
 
   params = {"db": "pubmed", "id": ",".join(pmids), "retmode": "xml"}
+  if email := os.getenv("NCBI_EMAIL"):
+    params["email"] = email
 
   try:
     response = requests.get(PUBMED_FETCH_URL, params=params, timeout=30)
@@ -88,3 +100,8 @@ def fetch_papers(pmids: list[str]) -> list[dict]:
   except Exception as e:
     print(f"EFetch API Error: {e}")
     return []
+
+
+def fetch_papers(pmids: list[str]) -> list[dict]:
+  """Fetches PubMed records, caching repeated result sets for one hour."""
+  return _fetch_papers_cached(tuple(pmids))

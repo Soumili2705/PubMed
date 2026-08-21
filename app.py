@@ -1,451 +1,332 @@
+"""Knowway AI — PubMed Biomedical Intelligence Platform."""
 from __future__ import annotations
 import time
 import streamlit as st
 
-# Internal core modules (preserving all working backend functionality)
-from src._ai_summary import answer_rag_question, generate_summary
-from src._fetch_papers import fetch_papers, search_pubmed
-from src._rank_papers import rank_papers
+from src._ai_summary      import answer_rag_question, generate_summary
+from src._fetch_papers    import fetch_papers, search_pubmed
+from src._rank_papers     import rank_papers
 from src._translate_query import translate_to_mesh_query
-from src.analytics import render_analytics_dashboard
-from src.styles import CUSTOM_CSS
-from src.ui_components import (
-    generate_dossier_markdown,
-    render_hero_header,
-    render_how_it_works,
-    render_paper_card,
-    render_researcher_impact,
+from src.analytics        import render_analytics_dashboard
+from src.styles           import CUSTOM_CSS
+from src.ui_components    import (
+    generate_dossier_markdown, render_hero_header, render_how_it_works,
+    render_intro_card, render_paper_card, render_researcher_impact,
     render_understood_section,
 )
 
-# --- 1. PAGE CONFIGURATION & INJECT MINIMAL-CONTRAST FROSTED GLASS THEME ---
+# ── CONFIG ────────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Knowway AI — Find your knowledge in the right way.",
-    page_icon="🧬",
-    layout="wide",
+    page_title="Knowway AI — Biomedical Discovery",
+    page_icon="🧬", layout="wide",
     initial_sidebar_state="collapsed",
 )
-
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-# --- 2. INITIALIZE SESSION STATE ---
-if "pipeline_results" not in st.session_state:
-  st.session_state.pipeline_results = None
-if "selected_query" not in st.session_state:
-  st.session_state.selected_query = ""
-if "chat_messages" not in st.session_state:
-  st.session_state.chat_messages = []
+# ── SESSION STATE ─────────────────────────────────────────────────────────────
+for k, v in [("results",None),("query",""),("chat",[]),("history",[]),("ikey",0)]:
+    if k not in st.session_state: st.session_state[k] = v
 
-# --- 3. TOP OF PAGE: STUDIO HERO & BREADCRUMB ---
+# ── HERO HEADER ───────────────────────────────────────────────────────────────
 render_hero_header()
 
-# --- 4. 2-COLUMN STUDIO WORKBENCH (PERSISTENT LEFT SIDEBAR + RIGHT SEARCH CANVAS) ---
-col_sidebar, col_main = st.columns([1, 2.8], gap="medium")
+# ── LAYOUT ───────────────────────────────────────────────────────────────────
+left, right = st.columns([1, 2.9], gap="large")
 
-# ==============================================================================
-# LEFT SIDEBAR PANEL (RETRIEVAL SETTINGS & GROUNDING STACK)
-# ==============================================================================
-with col_sidebar:
-  st.markdown(
-      """<div class="sidebar-panel-container">
-<div class="sidebar-section-title">🎛️ Retrieval Settings</div>
-<div class="sidebar-section-sub">Configure candidate pool depth and semantic vector cutoffs.</div>
-""",
-      unsafe_allow_html=True,
-  )
+# ══════════════════════════════════════════════════════════════════
+# LEFT SIDEBAR — All controls, full grounding stack, history, reset
+# ══════════════════════════════════════════════════════════════════
+with left:
+    st.markdown('<div class="kw-sidebar">', unsafe_allow_html=True)
 
-  fetch_limit = st.slider(
-      "Candidate Pool Size",
-      min_value=5,
-      max_value=30,
-      value=12,
-      step=1,
-      help="Number of candidate records retrieved from NCBI PubMed.",
-  )
-  st.markdown(
-      f"<div style='font-size:11px; color:#2563EB; font-weight:700;"
-      f" font-family:var(--font-mono); margin-top:-6px; margin-bottom:10px;'>"
-      f"▶ {fetch_limit} candidate studies</div>",
-      unsafe_allow_html=True,
-  )
+    # ── Retrieval Settings ────────────────────────────────
+    st.markdown('<div class="kw-section-label">🎛 Retrieval Settings</div>', unsafe_allow_html=True)
 
-  min_similarity = st.slider(
-      "Minimum Similarity Threshold",
-      min_value=0.20,
-      max_value=0.85,
-      value=0.35,
-      step=0.05,
-      help="Filter out candidate records below this vector cosine similarity.",
-  )
-  st.markdown(
-      f"<div style='font-size:11px; color:#0D9488; font-weight:700;"
-      f" font-family:var(--font-mono); margin-top:-6px; margin-bottom:12px;'>"
-      f"▶ {min_similarity:.2f} cosine similarity</div>",
-      unsafe_allow_html=True,
-  )
-
-  st.markdown("<div class='sidebar-divider'></div>", unsafe_allow_html=True)
-
-  st.markdown(
-      """<div class="sidebar-section-title">🎯 System Objectives</div>
-<div style="font-size: 11.5px; color: #475569; line-height: 1.6; margin-bottom: 8px;">
-• <strong>Precision:</strong> MeSH & synonym ontology<br>
-• <strong>Recall:</strong> Surface related clinical trials<br>
-• <strong>Ranking:</strong> 384-dim dense vector cosine<br>
-• <strong>Grounding:</strong> Verified PubMed PMIDs
-</div>
-""",
-      unsafe_allow_html=True,
-  )
-
-  st.markdown("<div class='sidebar-divider'></div>", unsafe_allow_html=True)
-
-  st.markdown(
-      """<div class="sidebar-section-title">🔬 Grounding Stack</div>
-<div class="sidebar-status-box">
-  <div style="font-weight:700; color:#0F172A; margin-bottom:4px;">NLM & NCBI Live Pipeline</div>
-  • <strong>Ontology:</strong> MeSH 2026 Tree<br>
-  • <strong>Retrieval:</strong> PubMed E-Utilities<br>
-  • <strong>Embeddings:</strong> MiniLM 384-dim<br>
-  • <strong>Synthesis:</strong> Groq LLaMA 3.3
-</div>
-""",
-      unsafe_allow_html=True,
-  )
-
-  st.markdown("<div class='sidebar-divider'></div>", unsafe_allow_html=True)
-
-  if st.button("🗑️ Reset Session", use_container_width=True):
-    st.session_state.pipeline_results = None
-    st.session_state.chat_messages = []
-    st.session_state.selected_query = ""
-    st.rerun()
-
-  st.markdown("</div>", unsafe_allow_html=True)
-
-
-# ==============================================================================
-# RIGHT MAIN CANVAS (PUBMED INTRO + PRESETS + SEARCH PROMPT + RESULTS)
-# ==============================================================================
-with col_main:
-  # 1. LIVE NCBI PUBMED & BIOMEDICAL KNOWLEDGE FETCHING INTRO CARD
-  st.markdown(
-      """<div class="pubmed-intro-card">
-<div class="pubmed-intro-title">📡 Live NCBI PubMed & Biomedical Knowledge Fetching</div>
-<p class="pubmed-intro-desc">
-Knowway AI connects directly to the <strong>National Center for Biotechnology Information (NCBI PubMed)</strong> live repository of over 36 million peer-reviewed biomedical records. Natural-language inquiries are mapped to standardized <strong>NLM MeSH descriptors</strong>, retrieving active clinical literature and ranking candidate abstracts using <strong>384-dimensional dense semantic vector similarity</strong> to synthesize grounded, transparent evidence briefings.
-</p>
-<div class="intro-features-grid">
-  <div class="intro-feature-item">
-    <div class="intro-feature-label">🧠 Concept Ontology</div>
-    <p class="intro-feature-text">Translates conversational clinical queries into standardized MeSH terms and synonyms.</p>
-  </div>
-  <div class="intro-feature-item">
-    <div class="intro-feature-label">📡 Real-Time Entrez</div>
-    <p class="intro-feature-text">Fetches authentic, live PubMed research records and verified PMID citations.</p>
-  </div>
-  <div class="intro-feature-item">
-    <div class="intro-feature-label">🎯 Honest Vectors</div>
-    <p class="intro-feature-text">SentenceTransformer embeddings rank papers by genuine semantic alignment.</p>
-  </div>
-</div>
-</div>""",
-      unsafe_allow_html=True,
-  )
-
-  # 2. EXPLORATION PRESETS CARD (ABOVE THE SEARCH BOX)
-  st.markdown(
-      """<div class="preset-card-container">
-<div class="preset-card-title">💡 Exploration Presets — Select a Research Inquiry Template</div>
-""",
-      unsafe_allow_html=True,
-  )
-
-  pr1, pr2, pr3, pr4 = st.columns(4)
-  with pr1:
-    if st.button("🧪 Oncology (NSCLC)", use_container_width=True, help="Lung cancer immunotherapy clinical trials efficacy"):
-      st.session_state.selected_query = "lung cancer immunotherapy clinical trials efficacy"
-      st.rerun()
-  with pr2:
-    if st.button("👶 Pediatrics (Asthma)", use_container_width=True, help="Pediatric acute asthma management guidelines"):
-      st.session_state.selected_query = "pediatric asthma acute management guidelines"
-      st.rerun()
-  with pr3:
-    if st.button("🧠 Neurology (Alzheimer's)", use_container_width=True, help="Early detection biomarkers in Alzheimer's disease"):
-      st.session_state.selected_query = "early detection biomarkers in alzheimers disease"
-      st.rerun()
-  with pr4:
-    if st.button("💉 Nephrology (Diabetes)", use_container_width=True, help="Diabetic kidney damage in elderly patients"):
-      st.session_state.selected_query = "sugar disease causing kidney damage in old people"
-      st.rerun()
-
-  st.markdown("</div>", unsafe_allow_html=True)
-
-  # 3. SEARCH ENGINE PROMPT INPUT CARD
-  st.markdown(
-      """<div class="main-search-card">
-<div class="main-search-label">🔍 What biomedical question are you trying to explore?</div>
-""",
-      unsafe_allow_html=True,
-  )
-
-  query_input = st.text_input(
-      "Search Query",
-      value=st.session_state.selected_query,
-      placeholder="e.g., early detection biomarkers in Alzheimer's disease",
-      label_visibility="collapsed",
-  )
-
-  btn_col, info_col = st.columns([1.2, 2])
-  with btn_col:
-    execute_btn = st.button(
-        "🚀 Find Relevant Evidence", type="primary", use_container_width=True
+    fast_mode = st.toggle(
+        "⚡ Fast mode", value=True,
+        help="Uses deterministic query mapping, fewer candidates, and Groq's faster model.",
     )
-  with info_col:
+    st.caption("Fast: quicker results · Deep: broader AI-assisted query mapping")
+    fetch_limit = st.slider(
+        "Candidate Pool Size", 5, 30, 8, 1,
+        help="Number of candidate records retrieved from NCBI PubMed.",
+    )
+    min_sim = st.slider(
+        "Min Similarity Threshold", 0.20, 0.85, 0.35, 0.05,
+        help="Filter out candidates below this cosine similarity score.",
+    )
     st.markdown(
-        "<div style='padding-top: 6px; font-size: 12.5px; color: #64748B;'>"
-        "Evidence-grounded synthesis · PubMed-verified PMIDs"
-        "</div>",
+        f"<div style='font-size:11px;color:#1D4ED8;font-family:var(--mono);"
+        f"margin:-2px 0 10px;'>▶ {fetch_limit} candidates · ≥ {min_sim:.2f} similarity</div>",
         unsafe_allow_html=True,
     )
 
-  st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="kw-divider"></div>', unsafe_allow_html=True)
 
-  # 2. PIPELINE EXECUTION (RUNS IN-STREAM INSIDE RIGHT COLUMN)
-  if execute_btn:
-    if not query_input.strip():
-      st.warning("⚠️ Please enter a research question or select a preset from the sidebar.")
+    # ── Grounding Stack (full labels like screenshot 2) ───
+    st.markdown('<div class="kw-section-label">🔬 Grounding Stack</div>', unsafe_allow_html=True)
+    for label, value in [
+        ("Ontology",   "MeSH-informed mapping"),
+        ("Retrieval",  "NCBI E-Utilities"),
+        ("Embeddings", "MiniLM 384-dim"),
+        ("Synthesis",  "Groq LLaMA 3.3"),
+    ]:
+        st.markdown(
+            f'<div class="kw-stack-row">• <strong>{label}:</strong> {value}</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown('<div class="kw-divider"></div>', unsafe_allow_html=True)
+
+    # ── Recent Searches ───────────────────────────────────
+    st.markdown('<div class="kw-section-label">🕐 Recent Searches</div>', unsafe_allow_html=True)
+
+    if st.session_state.history:
+        for i, item in enumerate(st.session_state.history):
+            lbl = item["query"][:24] + ("…" if len(item["query"]) > 24 else "")
+            if st.button(f"🔍 {lbl}", key=f"h{i}", use_container_width=True,
+                         help=item["query"]):
+                st.session_state.query   = item["query"]
+                st.session_state.results = item["results"]
+                st.session_state.chat    = []
+                st.session_state.ikey   += 1
+                st.rerun()
+        if st.button("✕ Clear History", use_container_width=True):
+            st.session_state.history = []
+            st.rerun()
     else:
-      st.session_state.selected_query = query_input
-      timings = {}
-      total_start = time.time()
-
-      with st.status(
-          "🔍 Discovering and synthesizing relevant literature...", expanded=True
-      ) as status:
-        # Step 1: Concept Understanding & MeSH Translation
-        t0 = time.time()
-        st.write("🧠 Interpreting clinical intent & mapping biomedical concepts...")
-        translation = translate_to_mesh_query(query_input)
-        pubmed_query = translation["pubmed_query"]
-        mesh_terms = translation["mesh_terms"]
-        clinical_terms = translation["clinical_terms"]
-        timings["mesh"] = time.time() - t0
-
-        # Step 2: PubMed Retrieval
-        t0 = time.time()
-        st.write(
-            f"📡 Retrieving top {fetch_limit} candidate studies from PubMed..."
-        )
-        pmids = search_pubmed(pubmed_query, max_results=fetch_limit)
-
-        if not pmids:
-          st.write("🔄 Broadening search with conceptual synonyms...")
-          pmids = search_pubmed(query_input, max_results=fetch_limit)
-
-        if not pmids:
-          status.update(
-              label="❌ No matching records found on PubMed.",
-              state="error",
-              expanded=False,
-          )
-          st.stop()
-
-        # Step 3: XML Metadata Fetch
-        st.write(f"📥 Fetching structured metadata for {len(pmids)} records...")
-        raw_papers = fetch_papers(pmids)
-        timings["ncbi"] = time.time() - t0
-
-        # Step 4: Semantic Ranking
-        t0 = time.time()
-        st.write("🎯 Ranking literature by research relevance and intent...")
-        ranked_papers = rank_papers(query_input, raw_papers, clinical_terms)
-        timings["vector"] = time.time() - t0
-
-        filtered_papers = [
-            p
-            for p in ranked_papers
-            if p.get("raw_score", p.get("similarity_score", 0.0))
-            >= min_similarity
-        ]
-
-        # Step 5: Evidence Synthesis
-        t0 = time.time()
-        st.write("🤖 Synthesizing query-grounded evidence summary...")
-        papers_for_synthesis = (
-            filtered_papers if filtered_papers else ranked_papers[:5]
-        )
-        ai_report = generate_summary(query_input, papers_for_synthesis)
-        timings["groq"] = time.time() - t0
-
-        total_latency = time.time() - total_start
-        status.update(
-            label=f"✅ Discovery Complete in {total_latency:.2f}s!",
-            state="complete",
-            expanded=False,
+        st.markdown(
+            '<div class="kw-no-history">No searches yet this session.</div>',
+            unsafe_allow_html=True,
         )
 
-        # Store in session state
-        st.session_state.pipeline_results = {
-            "query": query_input,
-            "translation": translation,
-            "raw_papers": raw_papers,
-            "ranked_papers": ranked_papers,
-            "filtered_papers": filtered_papers,
-            "ai_report": ai_report,
-            "timings": timings,
-            "latency": total_latency,
-        }
+    st.markdown('<div class="kw-divider"></div>', unsafe_allow_html=True)
 
-  # 3. RESULTS DASHBOARD (FLOWS IN-LINE DIRECTLY BENEATH PROMPT IN RIGHT COLUMN)
-  if st.session_state.pipeline_results:
-    res = st.session_state.pipeline_results
-    ranked_papers = res["ranked_papers"]
-    active_filtered = [
-        p
-        for p in ranked_papers
-        if p.get("raw_score", p.get("similarity_score", 0.0)) >= min_similarity
+    # ── Reset Session ─────────────────────────────────────
+    if st.button("🗑 Reset Session", use_container_width=True):
+        st.session_state.results = None
+        st.session_state.chat    = []
+        st.session_state.query   = ""
+        st.session_state.ikey   += 1
+        st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════════════════
+# RIGHT CANVAS — Intro + Templates + Search + Results
+# ══════════════════════════════════════════════════════════════════
+with right:
+
+    # ── 1. Intro card (Live NCBI PubMed + 3 knowledge cards) ──
+    render_intro_card()
+
+    # ── 2. Quick Research Templates ───────────────────────────
+    st.markdown("""<div class="kw-tmpl-card">
+  <div class="kw-tmpl-title">💡 Quick Research Templates — Select a Research Inquiry</div>""",
+                unsafe_allow_html=True)
+
+    PRESETS = [
+        ("🧪 Oncology",   "lung cancer immunotherapy clinical trials efficacy"),
+        ("👶 Pediatrics", "pediatric asthma acute management guidelines"),
+        ("🧠 Neurology",  "early detection biomarkers in alzheimers disease"),
+        ("💉 Nephrology", "sugar disease causing kidney damage in old people"),
     ]
-    translation = res["translation"]
-    timings = res["timings"]
-    latency = res["latency"]
-    mesh_terms = translation.get("mesh_terms", [])
-    clinical_terms = translation.get("clinical_terms", [])
-    all_concepts = list(dict.fromkeys(mesh_terms + clinical_terms))
+    pc = st.columns(len(PRESETS))
+    for col, (lbl, qry) in zip(pc, PRESETS):
+        with col:
+            if st.button(lbl, use_container_width=True):
+                st.session_state.query = qry
+                st.session_state.ikey += 1
+                st.rerun()
 
-    # A. WE UNDERSTOOD YOUR QUESTION
-    render_understood_section(res["query"], mesh_terms, clinical_terms)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    # B. YOUR KNOWLEDGE PATH HEADER
-    st.markdown(
-        f"""<div class="knowledge-path-header">
-  <h2 class="knowledge-path-title">🧭 Your Knowledge Path</h2>
-  <p class="knowledge-path-subtitle"><strong>{len(active_filtered)} studies discovered</strong> · ranked by research relevance</p>
-</div>""",
-        unsafe_allow_html=True,
+    # ── 3. Research Question + Search ─────────────────────────
+    st.markdown("""<div class="kw-search-card">
+  <div class="kw-search-section-label">🔍 Research Question</div>
+  <div class="kw-search-heading">What biomedical question are you trying to explore?</div>
+</div>""", unsafe_allow_html=True)
+
+    query_input = st.text_input(
+        "Query",
+        value=st.session_state.query,
+        key=f"q_{st.session_state.ikey}",
+        placeholder="e.g., early detection biomarkers in Alzheimer's disease",
+        label_visibility="collapsed",
     )
 
-    # C. METRICS ROW
-    top_raw_score = (
-        round(
-            ranked_papers[0].get(
-                "raw_score", ranked_papers[0].get("similarity_score", 0.0)
-            ),
-            3,
-        )
-        if ranked_papers
-        else 0.0
-    )
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    with kpi1:
-      st.metric(label="Studies Retrieved", value=len(res["raw_papers"]))
-    with kpi2:
-      st.metric(
-          label="Concepts Identified", value=len(mesh_terms) + len(clinical_terms)
-      )
-    with kpi3:
-      st.metric(label="Top Vector Sim", value=f"{top_raw_score:.3f}")
-    with kpi4:
-      st.metric(label="Latency", value=f"{latency:.2f}s")
-
-    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
-
-    # D. 4 WORKBENCH TABS
-    tab1, tab2, tab3, tab4 = st.tabs([
-        f"📚 Evidence Explorer ({len(active_filtered)})",
-        "📝 Evidence Summary",
-        "📊 Biomedical Analysis",
-        "💬 Chat with Literature",
-    ])
-
-    # TAB 1: EVIDENCE EXPLORER
-    with tab1:
-      st.markdown("### 📚 Discovered Literature Records")
-      if active_filtered:
-        for i, paper in enumerate(active_filtered, start=1):
-          render_paper_card(paper, i, all_concepts)
-      else:
-        st.warning(
-            f"No papers met the {min_similarity:.2f} threshold. Lower the slider"
-            " in the control panel to inspect all retrieved candidate papers."
+    btn_col, hint_col = st.columns([1.4, 2.2])
+    with btn_col:
+        run = st.button("🚀 Find Relevant Evidence", type="primary", use_container_width=True)
+    with hint_col:
+        st.markdown(
+            "<div style='padding-top:10px;font-size:12px;color:#94A3B8;'>"
+            "PubMed-verified &nbsp;·&nbsp; Semantically ranked &nbsp;·&nbsp; AI-synthesised</div>",
+            unsafe_allow_html=True,
         )
 
-    # TAB 2: EVIDENCE SUMMARY BRIEFING
-    with tab2:
-      col_syn_left, col_syn_right = st.columns([3, 1])
-      with col_syn_left:
-        st.markdown("### 📝 Evidence Summary Briefing")
-      with col_syn_right:
-        dossier_content = generate_dossier_markdown(
-            res["query"],
-            translation,
-            active_filtered if active_filtered else ranked_papers[:5],
-            res["ai_report"],
-            latency,
-            timings,
-        )
-        st.download_button(
-            label="📥 Export Evidence Dossier",
-            data=dossier_content,
-            file_name=f"PubMedAI_Dossier_{int(time.time())}.md",
-            mime="text/markdown",
-            use_container_width=True,
-        )
+    # ── 4. Pipeline Execution ─────────────────────────────────
+    if run:
+        if not query_input.strip():
+            st.warning("⚠️ Enter a research question or select a template above.")
+        else:
+            st.session_state.query = query_input
+            t_start, timings = time.time(), {}
 
-      st.markdown(
-          f'<div class="summary-container-clean">{res["ai_report"]}</div>',
-          unsafe_allow_html=True,
-      )
+            with st.status("🔍 Searching PubMed and synthesising evidence…", expanded=True) as status:
+                t0 = time.time()
+                st.write("🧠 Mapping biomedical concepts & MeSH terms…")
+                tr = translate_to_mesh_query(query_input, use_llm=not fast_mode)
+                timings["mesh"] = time.time() - t0
 
-      with st.expander("🔍 View Raw Boolean Query sent to PubMed"):
-        st.code(translation.get("pubmed_query", ""), language="sql")
+                t0 = time.time()
+                st.write(f"📡 Querying PubMed for {fetch_limit} candidates…")
+                candidate_limit = min(fetch_limit, 8) if fast_mode else fetch_limit
+                pmids = search_pubmed(tr["pubmed_query"], max_results=candidate_limit)
+                if not pmids:
+                    st.write("🔄 Broadening search query…")
+                    pmids = search_pubmed(query_input, max_results=candidate_limit)
+                if not pmids:
+                    status.update(label="❌ No records found on PubMed.", state="error", expanded=False)
+                    st.stop()
+                st.write(f"📥 Fetching metadata for {len(pmids)} records…")
+                raw = fetch_papers(pmids)
+                timings["ncbi"] = time.time() - t0
 
-    # TAB 3: BIOMEDICAL ANALYSIS
-    with tab3:
-      st.markdown("### 📊 Retrieval & Concept Analytics")
-      render_analytics_dashboard(
-          papers=ranked_papers,
-          timings=timings,
-          mesh_terms=translation.get("mesh_terms", []),
-          min_threshold=min_similarity,
-      )
+                t0 = time.time()
+                st.write("🎯 Ranking by semantic relevance…")
+                ranked   = rank_papers(query_input, raw, tr["clinical_terms"])
+                filtered = [p for p in ranked
+                            if p.get("raw_score", p.get("similarity_score", 0)) >= min_sim]
+                timings["vector"] = time.time() - t0
 
-    # TAB 4: CHAT WITH LITERATURE (INTERACTIVE RAG)
-    with tab4:
-      st.markdown("### 💬 Chat with Literature")
-      st.caption(
-          "Ask targeted follow-up questions. Responses are strictly grounded in"
-          " the retrieved study abstracts and cite verified PMIDs."
-      )
+                t0 = time.time()
+                st.write("🤖 Synthesising AI evidence briefing…")
+                pool   = filtered if filtered else ranked[:5]
+                report = generate_summary(query_input, pool, fast_mode=fast_mode)
+                timings["groq"] = time.time() - t0
 
-      for msg in st.session_state.chat_messages:
-        with st.chat_message(msg["role"]):
-          st.markdown(msg["content"])
+                total = time.time() - t_start
+                status.update(label=f"✅ Complete — {total:.2f}s", state="complete", expanded=False)
 
-      user_rag_query = st.chat_input(
-          "Ask a specific question about the retrieved studies..."
-      )
-      if user_rag_query:
-        st.session_state.chat_messages.append(
-            {"role": "user", "content": user_rag_query}
-        )
-        with st.chat_message("user"):
-          st.markdown(user_rag_query)
-
-        with st.chat_message("assistant"):
-          with st.spinner("🤖 Cross-referencing retrieved study abstracts..."):
-            answer = answer_rag_question(
-                user_rag_query,
-                active_filtered if active_filtered else ranked_papers[:5],
-                st.session_state.chat_messages,
+            res = dict(
+                query=query_input, translation=tr, raw_papers=raw,
+                ranked_papers=ranked, filtered_papers=filtered,
+                ai_report=report, timings=timings, latency=total,
             )
-            st.markdown(answer)
-            st.session_state.chat_messages.append(
-                {"role": "assistant", "content": answer}
+            st.session_state.results = res
+
+            # History (deduplicated, max 8)
+            st.session_state.history = [h for h in st.session_state.history
+                                         if h["query"].lower() != query_input.lower()]
+            st.session_state.history.insert(0, {
+                "query": query_input,
+                "time": time.strftime("%H:%M"),
+                "results": res,
+            })
+            st.session_state.history = st.session_state.history[:8]
+
+    # ── 5. Results Dashboard ──────────────────────────────────
+    if st.session_state.results:
+        res      = st.session_state.results
+        ranked   = res["ranked_papers"]
+        active   = [p for p in ranked
+                    if p.get("raw_score", p.get("similarity_score", 0)) >= min_sim]
+        tr       = res["translation"]
+        mesh     = tr.get("mesh_terms", [])
+        clin     = tr.get("clinical_terms", [])
+        concepts = list(dict.fromkeys(mesh + clin))
+
+        # Understood section
+        render_understood_section(
+            res["query"], mesh, clin,
+            facets=tr.get("facets"),
+            pubmed_query=tr.get("pubmed_query"),
+        )
+
+        # Section header + KPIs
+        top_score = (
+            round(ranked[0].get("raw_score", ranked[0].get("similarity_score", 0)), 3)
+            if ranked else 0.0
+        )
+        st.markdown(
+            f"<div class='kw-result-header'>🧭 Your Knowledge Path "
+            f"<span>{len(active)} studies discovered · ranked by semantic relevance</span></div>",
+            unsafe_allow_html=True,
+        )
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("📄 Studies Retrieved",  len(res["raw_papers"]))
+        k2.metric("🏷 Concepts Identified", len(mesh) + len(clin))
+        k3.metric("🎯 Top Relevance",      f"{top_score:.3f}")
+        k4.metric("⚡ Total Latency",      f"{res['latency']:.2f}s")
+
+        # Tabs
+        t1, t2, t3, t4 = st.tabs([
+            f"📚 Evidence Explorer ({len(active)})",
+            "📝 Evidence Summary",
+            "📊 Biomedical Analytics",
+            "💬 Chat with Literature",
+        ])
+
+        with t1:
+            if active:
+                if len(active) <= 3:
+                    st.info("Only a few closely related studies were found. Try a broader question or lower the relevance threshold.")
+                for i, paper in enumerate(active, 1):
+                    render_paper_card(paper, i, concepts)
+            else:
+                st.warning(
+                    f"No papers above {min_sim:.2f} threshold. "
+                    "Lower 'Min Similarity' in the left panel to see all candidates."
+                )
+
+        with t2:
+            hdr_col, dl_col = st.columns([3, 1])
+            hdr_col.markdown(
+                "<div style='font-size:15px;font-weight:800;color:#0F172A;"
+                "letter-spacing:-0.02em;padding-top:4px;'>📝 AI Evidence Briefing</div>",
+                unsafe_allow_html=True,
+            )
+            with dl_col:
+                dossier = generate_dossier_markdown(
+                    res["query"], tr, active or ranked[:5],
+                    res["ai_report"], res["latency"], res["timings"],
+                )
+                st.download_button(
+                    "📥 Export Dossier", dossier,
+                    file_name=f"KnowwayAI_{int(time.time())}.md",
+                    mime="text/markdown", use_container_width=True,
+                )
+            st.markdown(f'<div class="kw-summary">{res["ai_report"]}</div>',
+                        unsafe_allow_html=True)
+            with st.expander("🔍 View Raw Boolean Query sent to PubMed"):
+                st.code(tr.get("pubmed_query", ""), language="sql")
+
+        with t3:
+            render_analytics_dashboard(
+                papers=ranked, timings=res["timings"],
+                mesh_terms=mesh, min_threshold=min_sim,
             )
 
-    # E. RESEARCHER IMPACT SECTION
-    render_researcher_impact()
+        with t4:
+            st.caption(
+                "Ask targeted follow-up questions. Responses are strictly grounded "
+                "in the retrieved study abstracts and cite verified PMIDs."
+            )
+            for msg in st.session_state.chat:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+            if q := st.chat_input("Ask a specific question about the retrieved studies…"):
+                st.session_state.chat.append({"role": "user", "content": q})
+                with st.chat_message("user"): st.markdown(q)
+                with st.chat_message("assistant"):
+                    with st.spinner("Cross-referencing retrieved abstracts…"):
+                        ans = answer_rag_question(q, active or ranked[:5], st.session_state.chat)
+                        st.markdown(ans)
+                        st.session_state.chat.append({"role": "assistant", "content": ans})
 
-    # F. HOW IT WORKS SECTION
-    render_how_it_works()
+        render_researcher_impact()
+        render_how_it_works()
+        st.caption("For biomedical literature discovery only — not medical advice or a clinical decision tool.")

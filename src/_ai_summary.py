@@ -3,6 +3,7 @@ import os
 import re
 from dotenv import load_dotenv
 from groq import Groq
+import streamlit as st
 
 load_dotenv()
 
@@ -17,7 +18,8 @@ def _get_groq_client() -> Groq | None:
   return None
 
 
-def generate_summary(query: str, papers: list[dict]) -> str:
+@st.cache_data(ttl=3600, show_spinner=False)
+def generate_summary(query: str, papers: list[dict], fast_mode: bool = True) -> str:
   """Synthesizes an evidence-grounded, query-dependent clinical briefing strictly from retrieved abstracts.
 
   Eliminates rigid templates and avoids hallucinating therapeutic/treatment
@@ -81,11 +83,11 @@ FORMAT YOUR RESPONSE EXACTLY AS FOLLOWS:
 
   client = _get_groq_client()
   if client:
-    candidate_models = [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "gemma2-9b-it",
-    ]
+    candidate_models = (
+        ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]
+        if fast_mode
+        else ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"]
+    )
     for model_id in candidate_models:
       try:
         response = client.chat.completions.create(
@@ -146,7 +148,7 @@ FORMAT YOUR RESPONSE EXACTLY AS FOLLOWS:
   first_p = top_papers[0]
 
   return f"""### 💡 Evidence Synthesis
-Based on peer-reviewed literature retrieved from PubMed for *"{query}"*, the evidence demonstrates that specific clinical markers and mechanisms in **{first_p.get('title')}** [PMID: {first_p.get('pmid')}] provide measurable predictive and clinical utility across evaluated cohorts.
+This is an extractive overview of the retrieved PubMed abstracts for *"{query}"*. The top-ranked study is **{first_p.get('title')}** [PMID: {first_p.get('pmid')}]. Review the linked abstracts for full methods, results, and clinical context.
 
 ### 🔬 Key Findings from Retrieved Evidence
 {bullets_md}
@@ -157,8 +159,8 @@ Based on peer-reviewed literature retrieved from PubMed for *"{query}"*, the evi
 {table_md}
 
 ### ⚠️ Evidence Gaps & Study Limitations
-- Cohort heterogeneity and pre-analytical assay variability require prospective cross-cohort validation.
-- Long-term clinical endpoint correlation and threshold standardization remain active areas of investigation.
+- Limitations are not consistently available in every abstract; inspect each linked paper before drawing conclusions.
+- This extractive fallback does not assess study quality, risk of bias, or clinical applicability.
 """
 
 
