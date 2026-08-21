@@ -4,61 +4,58 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import streamlit as st
 
+MODEL_NAME = "all-MiniLM-L6-v2"
+SIGMOID_MIDPOINT = 0.40
+SIGMOID_STEEPNESS = -12.0
+SCORE_MIN_CLIP = 0.10
+SCORE_MAX_CLIP = 0.98
+
 
 @st.cache_resource(show_spinner="🧬 Loading 384-dim Dense Vector Model...")
-def get_embedding_model():
-  """Loads and caches the all-MiniLM-L6-v2 model for instant vector inference."""
-  model = SentenceTransformer("all-MiniLM-L6-v2")
-  try:
-    # Warmup pass to eliminate first-query cold-start latency
-    model.encode(["Biomedical literature warmup query"])
-  except Exception:
-    pass
-  return model
+def get_embedding_model() -> SentenceTransformer:
+    """Loads, caches, and warms up the dense vector model for instant inference."""
+    model = SentenceTransformer(MODEL_NAME)
+    try:
+        model.encode(["Biomedical literature warmup query"])
+    except Exception:
+        pass
+    return model
+
+
+def _calibrate_similarity(raw_score: float) -> float:
+    """Non-linear sigmoid transformation to calibrate raw cosine score into confidence percentage."""
+    scaled = 1.0 / (1.0 + np.exp(SIGMOID_STEEPNESS * (raw_score - SIGMOID_MIDPOINT)))
+    return float(np.clip(scaled, SCORE_MIN_CLIP, SCORE_MAX_CLIP))
 
 
 def rank_papers(
     query: str, papers: list[dict], clinical_terms: list[str] | None = None
 ) -> list[dict]:
-  """Ranks retrieved PubMed papers using lightweight, medically-sharp title & ontology intent weighting."""
-  if not papers:
-    return []
+    """Ranks retrieved PubMed papers using dense semantic embeddings and intent calibration."""
+    if not papers:
+        return []
 
-  model = get_embedding_model()
-
-  # Build an enriched clinical intent query
-  clinical_context = ", ".join(clinical_terms) if clinical_terms else query
-  target_intent = (
-      f"Clinical Topic: {query}. Target Pathology & Focus: {clinical_context}."
-      " Primary human trial outcomes and treatment endpoints."
-  )
-
-  query_embedding = model.encode([target_intent])
-
-  # Medically Sharp Structuring: Puts Title & Core Medical Focus first so primary endpoints rank highest
-  paper_texts = []
-  for p in papers:
-    title = p.get("title", "Untitled Study")
-    abstract = p.get("abstract", "")
-    paper_texts.append(
-        f"Title: {title}. Abstract: {abstract}"
+    model = get_embedding_model()
+    clinical_context = ", ".join(clinical_terms) if clinical_terms else query
+    target_intent = (
+        f"Clinical Topic: {query}. Target Pathology & Focus: {clinical_context}."
+        " Primary human trial outcomes and treatment endpoints."
     )
 
-  paper_embeddings = model.encode(paper_texts)
+    query_embedding = model.encode([target_intent])
+    paper_texts = [
+        f"Title: {p.get('title', 'Untitled Study')}. Abstract: {p.get('abstract', '')}"
+        for p in papers
+    ]
+    paper_embeddings = model.encode(paper_texts)
+    raw_similarities = cosine_similarity(query_embedding, paper_embeddings)[0]
 
-  raw_similarities = cosine_similarity(query_embedding, paper_embeddings)[0]
+    ranked_papers: list[dict] = []
+    for paper, raw_score in zip(papers, raw_similarities):
+        ranked = paper.copy()
+        ranked["similarity_score"] = _calibrate_similarity(float(raw_score))
+        ranked["raw_score"] = float(raw_score)
+        ranked_papers.append(ranked)
 
-  ranked_papers = []
-  for paper, raw_score in zip(papers, raw_similarities):
-    ranked = paper.copy()
-    # Calibrate cosine score to standard 0-100% confidence curve
-    calibrated = float(
-        np.clip(1.0 / (1.0 + np.exp(-12 * (raw_score - 0.40))), 0.10, 0.98)
-    )
-    ranked["similarity_score"] = calibrated
-    ranked["raw_score"] = float(raw_score)
-    ranked_papers.append(ranked)
-
-  # Sort by highest semantic relevance
-  ranked_papers.sort(key=lambda p: p["similarity_score"], reverse=True)
-  return ranked_papers
+    ranked_papers.sort(key=lambda p: p["similarity_score"], reverse=True)
+    return ranked_papers
