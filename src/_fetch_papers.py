@@ -23,11 +23,12 @@ def _get_xml_text(elem: ET.Element, paths: list[str], default: str = "") -> str:
 @st.cache_data(ttl=3600, show_spinner=False)
 def search_pubmed(query: str, max_results: int = 15) -> list[str]:
     """Searches NCBI ESearch using the MeSH-expanded Boolean query."""
+    term = f"({query}) AND hasabstract[text]" if "hasabstract" not in query.lower() else query
     params = {
         "db": "pubmed",
-        "term": query,
+        "term": term,
         "retmode": "json",
-        "retmax": max_results,
+        "retmax": max(max_results * 2, 20),
         "sort": "relevance",
     }
     if email := os.getenv("NCBI_EMAIL"):
