@@ -167,17 +167,25 @@ with right:
         )
 
     # ── 4. Pipeline Execution ─────────────────────────────────
+    clean_query = (query_input or "").strip()
+    DISALLOWED_QUERIES = {
+        "what biomedical question are you trying to explore?",
+        "what biomedical question are you trying to explore",
+        "e.g., early detection biomarkers in alzheimer's disease",
+        "e.g., early detection biomarkers in alzheimers disease",
+    }
+
     if run:
-        if not query_input.strip():
-            st.warning("⚠️ Enter a research question or select a template above.")
+        if not clean_query or clean_query.lower() in DISALLOWED_QUERIES:
+            st.warning("⚠️ Please enter a biomedical question to search.")
         else:
-            st.session_state.query = query_input
+            st.session_state.query = clean_query
             t_start, timings = time.time(), {}
 
             with st.status("🔍 Searching PubMed and synthesising evidence…", expanded=True) as status:
                 t0 = time.time()
                 st.write("🧠 Mapping biomedical concepts & MeSH terms…")
-                tr = translate_to_mesh_query(query_input, use_llm=True, fast_mode=fast_mode)
+                tr = translate_to_mesh_query(clean_query, use_llm=True, fast_mode=fast_mode)
                 timings["mesh"] = time.time() - t0
 
                 t0 = time.time()
@@ -186,7 +194,7 @@ with right:
                 pmids = search_pubmed(tr["pubmed_query"], max_results=candidate_limit)
                 if not pmids:
                     st.write("🔄 Broadening search query…")
-                    pmids = search_pubmed(query_input, max_results=candidate_limit)
+                    pmids = search_pubmed(clean_query, max_results=candidate_limit)
                 if not pmids:
                     status.update(label="❌ No records found on PubMed.", state="error", expanded=False)
                     st.stop()
@@ -196,7 +204,7 @@ with right:
 
                 t0 = time.time()
                 st.write("🎯 Ranking by semantic relevance…")
-                ranked   = rank_papers(query_input, raw, tr["clinical_terms"])
+                ranked   = rank_papers(clean_query, raw, tr["clinical_terms"])
                 filtered = [p for p in ranked
                             if p.get("raw_score", p.get("similarity_score", 0)) >= min_sim]
                 timings["vector"] = time.time() - t0
@@ -204,14 +212,14 @@ with right:
                 t0 = time.time()
                 st.write("🤖 Synthesising AI evidence briefing…")
                 pool   = filtered if filtered else ranked[:5]
-                report = generate_summary(query_input, pool, fast_mode=fast_mode)
+                report = generate_summary(clean_query, pool, fast_mode=fast_mode)
                 timings["groq"] = time.time() - t0
 
                 total = time.time() - t_start
                 status.update(label=f"✅ Complete — {total:.2f}s", state="complete", expanded=False)
 
             res = dict(
-                query=query_input, translation=tr, raw_papers=raw,
+                query=clean_query, translation=tr, raw_papers=raw,
                 ranked_papers=ranked, filtered_papers=filtered,
                 ai_report=report, timings=timings, latency=total,
             )
@@ -219,9 +227,9 @@ with right:
 
             # History (deduplicated, max 8)
             st.session_state.history = [h for h in st.session_state.history
-                                         if h["query"].lower() != query_input.lower()]
+                                         if h["query"].lower() != clean_query.lower()]
             st.session_state.history.insert(0, {
-                "query": query_input,
+                "query": clean_query,
                 "time": time.strftime("%H:%M"),
                 "results": res,
             })

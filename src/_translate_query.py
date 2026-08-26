@@ -449,8 +449,44 @@ def translate_to_mesh_query(user_query: str, use_llm: bool = True, fast_mode: bo
       "validation_status": str
   }
   """
-  api_key = os.getenv("GROQ_API_KEY")
+  if not user_query or not user_query.strip():
+    return {
+        "pubmed_query": "",
+        "mesh_terms": [],
+        "clinical_terms": [],
+        "facets": {
+            "condition": None,
+            "intervention_or_biomarker": None,
+            "population": None,
+            "outcome_or_intent": None,
+            "intent": None,
+        },
+        "validation_status": "empty_query",
+    }
+
   q_clean = user_query.strip()
+  disallowed = {
+      "what biomedical question are you trying to explore?",
+      "what biomedical question are you trying to explore",
+      "e.g., early detection biomarkers in alzheimer's disease",
+      "e.g., early detection biomarkers in alzheimers disease",
+  }
+  if q_clean.lower() in disallowed:
+    return {
+        "pubmed_query": "",
+        "mesh_terms": [],
+        "clinical_terms": [],
+        "facets": {
+            "condition": None,
+            "intervention_or_biomarker": None,
+            "population": None,
+            "outcome_or_intent": None,
+            "intent": None,
+        },
+        "validation_status": "invalid_placeholder_query",
+    }
+
+  api_key = os.getenv("GROQ_API_KEY")
 
   # 1. Run deterministic rule-based mapping first
   rule_query, rule_mesh, rule_clinical, rule_facets, unmatched_words = _build_rule_based_query(q_clean)
