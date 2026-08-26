@@ -177,7 +177,7 @@ with right:
             with st.status("🔍 Searching PubMed and synthesising evidence…", expanded=True) as status:
                 t0 = time.time()
                 st.write("🧠 Mapping biomedical concepts & MeSH terms…")
-                tr = translate_to_mesh_query(query_input, use_llm=not fast_mode)
+                tr = translate_to_mesh_query(query_input, use_llm=True, fast_mode=fast_mode)
                 timings["mesh"] = time.time() - t0
 
                 t0 = time.time()

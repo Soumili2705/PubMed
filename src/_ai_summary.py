@@ -7,8 +7,8 @@ import streamlit as st
 
 load_dotenv()
 
-FAST_MODELS = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]
-DEEP_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "gemma2-9b-it"]
+FAST_MODELS = ["groq/compound-mini", "groq/compound", "openai/gpt-oss-120b"]
+DEEP_MODELS = ["groq/compound", "groq/compound-mini", "openai/gpt-oss-120b"]
 
 
 def _get_groq_client() -> Groq | None:

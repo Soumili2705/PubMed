@@ -248,6 +248,9 @@ def validate_pubmed_query(query: str) -> tuple[bool, str]:
 
   q = query.strip()
 
+  # Normalize single quotes to double quotes
+  q = re.sub(r"\'([^\']+)\'", r'"\1"', q)
+
   # 1. Balanced parentheses check
   if q.count("(") != q.count(")"):
     return False, q
@@ -385,7 +388,7 @@ def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str],
 
 # --- 3. MAIN TRANSLATION & CLINICAL FACET EXTRACTION ENGINE ---
 @st.cache_data(ttl=3600, show_spinner=False)
-def translate_to_mesh_query(user_query: str, use_llm: bool = True) -> dict:
+def translate_to_mesh_query(user_query: str, use_llm: bool = True, fast_mode: bool = False) -> dict:
   """Translates natural language questions into structured clinical facets and a validated PubMed Boolean query.
 
   PICO/Clinical Facets Extracted:
@@ -454,10 +457,7 @@ RESPOND WITH ONLY A JSON OBJECT:
 
     try:
       client = Groq(api_key=api_key.strip())
-      candidate_models = [
-          "llama-3.3-70b-versatile",
-          "llama-3.1-8b-instant",
-      ]
+      candidate_models = ["groq/compound-mini", "groq/compound", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
 
       for model_id in candidate_models:
         try:
@@ -474,11 +474,17 @@ RESPOND WITH ONLY A JSON OBJECT:
                   },
                   {"role": "user", "content": prompt},
               ],
-              response_format={"type": "json_object"},
-              temperature=0.05,
-              max_tokens=400,
+              temperature=0.1,
+              max_tokens=800,
           )
-          content = response.choices[0].message.content
+          content = response.choices[0].message.content.strip()
+          content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+          if "```" in content:
+            content = re.sub(r"^```[a-zA-Z]*\n?", "", content)
+            content = re.sub(r"```$", "", content).strip()
+          match = re.search(r'\{.*\}', content, re.DOTALL)
+          if match:
+            content = match.group(0)
           data = json.loads(content)
 
           # Extract data if valid
