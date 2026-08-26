@@ -282,15 +282,65 @@ def validate_pubmed_query(query: str) -> tuple[bool, str]:
   return True, q
 
 
+STOP_WORDS = {
+    "a", "an", "and", "are", "can", "could", "do", "does", "for", "how",
+    "in", "is", "of", "the", "to", "what", "with", "help", "from", "many",
+    "some", "such", "than", "that", "this", "these", "those"
+}
+
+
+def build_boolean_from_facet_concepts(facet_groups: dict[str, list[dict]]) -> str:
+  """Constructs a syntax-valid PubMed Boolean query where:
+
+  - Concepts and clinical synonyms within the same semantic facet are combined with OR.
+  - Distinct required semantic facets (Condition, Biomarker/Intervention, Population, Outcome) are combined with AND.
+  """
+  facet_clauses = []
+  facet_order = ["condition", "intervention", "population", "outcome"]
+
+  for f in facet_order:
+    items = facet_groups.get(f, [])
+    if not items:
+      continue
+
+    clause_elements = []
+    for item in items:
+      if item.get("query_part"):
+        clause_elements.append(item["query_part"])
+      else:
+        # 1. Official MeSH headings
+        for m in item.get("mesh", []):
+          clause_elements.append(f'"{m}"[MeSH Terms]')
+        # 2. Standard clinical synonyms / phrases
+        for c in item.get("clinical", []):
+          c_clean = c.strip().strip('"').strip("'")
+          if c_clean and c_clean.lower() not in STOP_WORDS:
+            clause_elements.append(f'"{c_clean}"[tiab]')
+
+    unique_elements = list(dict.fromkeys(clause_elements))
+    if unique_elements:
+      combined = " OR ".join(unique_elements)
+      if not (combined.startswith("(") and combined.endswith(")")):
+        combined = f"({combined})"
+      facet_clauses.append(combined)
+
+  if facet_clauses:
+    return " AND ".join(facet_clauses)
+  return ""
+
+
 def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str], dict, list[str]]:
   """Constructs a deterministic, MeSH-grounded Boolean query using the local medical dictionary."""
   q_lower = user_query.lower()
   matched_mesh = []
   matched_clinical = []
-  condition_parts = []
-  intervention_parts = []
-  population_parts = []
-  outcome_parts = []
+  
+  facet_groups = {
+      "condition": [],
+      "intervention": [],
+      "population": [],
+      "outcome": [],
+  }
   
   facets = {
       "condition": None,
@@ -321,31 +371,32 @@ def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str],
         matched_mesh.extend(mapping["mesh"])
         matched_clinical.extend(mapping["clinical"])
         facet_type = mapping.get("facet", "condition")
-        q_part = mapping["query_part"]
-
-        if facet_type == "condition":
-          condition_parts.append(q_part)
-          if not facets["condition"]:
-            facets["condition"] = mapping["mesh"][0]
-        elif facet_type == "intervention":
-          intervention_parts.append(q_part)
-          if not facets["intervention_or_biomarker"]:
-            facets["intervention_or_biomarker"] = mapping["mesh"][0]
+        
+        if facet_type in ["intervention", "biomarker"]:
+          group_key = "intervention"
         elif facet_type == "population":
-          population_parts.append(q_part)
-          if not facets["population"]:
-            facets["population"] = mapping["clinical"][0]
+          group_key = "population"
         elif facet_type == "outcome":
-          outcome_parts.append(q_part)
-          if not facets["outcome_or_intent"]:
-            facets["outcome_or_intent"] = mapping["clinical"][0]
-      start_pos = end_idx
+          group_key = "outcome"
+        else:
+          group_key = "condition"
 
-  # Assemble multi-facet Boolean query with AND between distinct concepts
-  query_blocks = []
-  for part in condition_parts + intervention_parts + population_parts + outcome_parts:
-    if part not in query_blocks:
-      query_blocks.append(part)
+        facet_groups[group_key].append({
+            "name": phrase.title(),
+            "mesh": mapping.get("mesh", []),
+            "clinical": mapping.get("clinical", []),
+            "query_part": mapping.get("query_part"),
+        })
+
+        if group_key == "condition" and not facets["condition"]:
+          facets["condition"] = mapping["mesh"][0] if mapping.get("mesh") else phrase.title()
+        elif group_key == "intervention" and not facets["intervention_or_biomarker"]:
+          facets["intervention_or_biomarker"] = mapping["mesh"][0] if mapping.get("mesh") else phrase.title()
+        elif group_key == "population" and not facets["population"]:
+          facets["population"] = mapping["clinical"][0] if mapping.get("clinical") else phrase.title()
+        elif group_key == "outcome" and not facets["outcome_or_intent"]:
+          facets["outcome_or_intent"] = mapping["clinical"][0] if mapping.get("clinical") else phrase.title()
+      start_pos = end_idx
 
   stop_words = {
       "a", "an", "and", "are", "can", "could", "do", "does", "for", "how",
@@ -360,19 +411,11 @@ def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str],
       and (cleaned := re.sub(r"[^\w\s-]", "", w).lower()) not in stop_words
       and not any(span[0] <= q_lower.find(cleaned) < span[1] for span in matched_spans)
   ]
-  if unmatched_words and query_blocks:
-    residual_clause = " OR ".join(f'"{w}"[tiab]' for w in unmatched_words[:4])
-    query_blocks.append(f"({residual_clause})")
 
-  if query_blocks:
-    final_bool = " AND ".join(
-        f"({block})"
-        if not (block.startswith("(") and block.endswith(")"))
-        else block
-        for block in query_blocks
-    )
-  else:
-    # Safe generic PubMed translation for unrecognized terms
+  # Generate Boolean query directly from normalized facet concepts (Residual words are NOT appended)
+  final_bool = build_boolean_from_facet_concepts(facet_groups)
+
+  if not final_bool:
     clean_words = [
         cleaned for word in user_query.split()
         if len(word) > 2
@@ -440,6 +483,7 @@ CRITICAL INSTRUCTIONS FOR BOOLEAN QUERY CONSTRUCTION:
 4. Enclose each facet in balanced parentheses.
 5. Use recognized PubMed field tags: [MeSH Terms] and [tiab].
 6. Do NOT add unrelated medical concepts or excessive terms that produce 0 results.
+7. STRICT NO-EXPANSION RULE: DO NOT expand generic concepts (such as "risk factors", "treatments", "causes", "biomarkers") into specific unmentioned clinical diseases or drugs (e.g. do NOT invent "hypertension", "smoking", "diabetes", or "aspirin" when the inquiry asks generally for "risk factors" or "treatments"). Only provide the direct concept MeSH descriptor and direct synonyms (e.g. "risk factor", "risk determinant", "predictor", "therapy", "treatment", "therapeutic").
 
 RESPOND WITH ONLY A JSON OBJECT:
 {{
@@ -457,7 +501,7 @@ RESPOND WITH ONLY A JSON OBJECT:
 
     try:
       client = Groq(api_key=api_key.strip())
-      candidate_models = ["groq/compound-mini", "groq/compound", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+      candidate_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.6-27b"]
 
       for model_id in candidate_models:
         try:
@@ -474,8 +518,8 @@ RESPOND WITH ONLY A JSON OBJECT:
                   },
                   {"role": "user", "content": prompt},
               ],
-              temperature=0.1,
-              max_tokens=800,
+              temperature=0.05,
+              max_tokens=1500,
           )
           content = response.choices[0].message.content.strip()
           content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
