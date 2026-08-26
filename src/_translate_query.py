@@ -279,7 +279,7 @@ def validate_pubmed_query(query: str) -> tuple[bool, str]:
   return True, q
 
 
-def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str], dict]:
+def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str], dict, list[str]]:
   """Constructs a deterministic, MeSH-grounded Boolean query using the local medical dictionary."""
   q_lower = user_query.lower()
   matched_mesh = []
@@ -380,7 +380,7 @@ def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str],
     else:
       final_bool = user_query
 
-  return final_bool, matched_mesh, matched_clinical, facets
+  return final_bool, matched_mesh, matched_clinical, facets, unmatched_words
 
 
 # --- 3. MAIN TRANSLATION & CLINICAL FACET EXTRACTION ENGINE ---
@@ -407,7 +407,7 @@ def translate_to_mesh_query(user_query: str, use_llm: bool = True) -> dict:
   q_clean = user_query.strip()
 
   # 1. Run deterministic rule-based mapping first
-  rule_query, rule_mesh, rule_clinical, rule_facets = _build_rule_based_query(q_clean)
+  rule_query, rule_mesh, rule_clinical, rule_facets, unmatched_words = _build_rule_based_query(q_clean)
 
   matched_mesh = list(rule_mesh)
   matched_clinical = list(rule_clinical)
@@ -415,12 +415,16 @@ def translate_to_mesh_query(user_query: str, use_llm: bool = True) -> dict:
   generated_pubmed_query = rule_query
   validation_status = "rule_based"
 
-  # 2. LLM-Guided Medical Facet Extraction & Ontology Grounding (if Groq is available)
-  if use_llm and api_key and api_key.strip():
+  # 2. Trigger LLM fallback if there are concepts not recognized by the dictionary
+  should_call_llm = use_llm and bool(unmatched_words or not rule_mesh)
+
+  if should_call_llm and api_key and api_key.strip():
+    unresolved_str = ", ".join(unmatched_words) if unmatched_words else "None"
     prompt = f"""You are a National Library of Medicine (NLM) Medical Ontologist and expert PubMed query engineer.
 Translate this natural language biomedical research question into standardized NLM MeSH headings, clinical synonyms, and an optimized PubMed Boolean search query.
 
 USER INQUIRY: "{q_clean}"
+UNRESOLVED CONCEPTS: {unresolved_str}
 
 CRITICAL INSTRUCTIONS FOR BOOLEAN QUERY CONSTRUCTION:
 1. Break down the inquiry into distinct clinical facets:
@@ -429,7 +433,7 @@ CRITICAL INSTRUCTIONS FOR BOOLEAN QUERY CONSTRUCTION:
    - Population (if explicitly requested, e.g. child, elderly, pregnant): (e.g. "Aged"[MeSH Terms] OR "elderly"[tiab])
    - Clinical Outcome / Intent (e.g. early detection, mortality, guideline): (e.g. "Early Diagnosis"[MeSH Terms] OR "screening"[tiab])
 2. Combine synonyms WITHIN each facet using OR.
-3. Combine DIFFERENT clinical facets using AND.
+3. Combine ALL distinct clinical facets using AND. Do NOT omit any concept facet.
 4. Enclose each facet in balanced parentheses.
 5. Use recognized PubMed field tags: [MeSH Terms] and [tiab].
 6. Do NOT add unrelated medical concepts or excessive terms that produce 0 results.
