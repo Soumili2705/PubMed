@@ -210,27 +210,27 @@ div[data-testid="stSlider"] > div > label,
   display: flex; align-items: center; gap: 7px;
 }
 .kw-intro-desc {
-  font-size: 14px; line-height: 1.65; color: var(--sub); margin-bottom: 16px;
+  font-size: 15px; line-height: 1.7; color: var(--sub); margin-bottom: 16px;
 }
 .kw-eyebrow {
-  font-size: 10px; font-weight: 800; letter-spacing: 0.12em;
+  font-size: 11px; font-weight: 800; letter-spacing: 0.12em;
   color: var(--blue); margin-bottom: 6px;
 }
 .kw-features {
-  display: grid; grid-template-columns: repeat(3,1fr); gap: 9px;
+  display: grid; grid-template-columns: repeat(3,1fr); gap: 12px;
 }
 @media (max-width:860px) { .kw-features { grid-template-columns: 1fr; } }
 .kw-feature {
-  background: rgba(248,250,252,0.90);
-  border: 1px solid rgba(203,213,225,0.60);
-  border-radius: 10px; padding: 10px 13px;
+  background: rgba(248,250,252,0.95);
+  border: 1px solid rgba(203,213,225,0.70);
+  border-radius: 11px; padding: 12px 15px;
 }
 .kw-feature-title {
-  font-size: 14px; font-weight: 800; color: var(--ink);
-  margin-bottom: 4px; display: flex; align-items: center; gap: 5px;
+  font-size: 15.5px; font-weight: 800; color: var(--ink);
+  margin-bottom: 5px; display: flex; align-items: center; gap: 6px;
 }
 .kw-feature-text {
-  font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 0;
+  font-size: 13.5px; color: var(--sub); line-height: 1.55; margin: 0;
 }
 
 /* Templates card */

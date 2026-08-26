@@ -148,6 +148,18 @@ MEDICAL_DICTIONARY: dict[str, dict] = {
         "facet": "outcome",
         "query_part": '("Early Diagnosis"[MeSH Terms] OR "early detection"[tiab] OR "early diagnosis"[tiab] OR "screening"[tiab])',
     },
+    "tests": {
+        "mesh": ["Diagnostic Tests, Routine", "Biomarkers"],
+        "clinical": ["Diagnostic Testing", "Laboratory Assays"],
+        "facet": "intervention",
+        "query_part": '("Diagnostic Tests, Routine"[MeSH Terms] OR "Biomarkers"[MeSH Terms] OR "tests"[tiab] OR "diagnostic assay"[tiab])',
+    },
+    "causes": {
+        "mesh": ["Etiology", "Causality", "Risk Factors"],
+        "clinical": ["Etiology", "Underlying Causes", "Risk Factors"],
+        "facet": "outcome",
+        "query_part": '("Etiology"[MeSH Terms] OR "Risk Factors"[MeSH Terms] OR "causes"[tiab] OR "etiology"[tiab] OR "risk factors"[tiab])',
+    },
     "preclinical": {
         "mesh": ["Early Diagnosis"],
         "clinical": ["Preclinical Detection", "Preclinical Alzheimer Disease"],
@@ -179,6 +191,18 @@ MEDICAL_DICTIONARY: dict[str, dict] = {
         "query_part": '("CRISPR-Cas Systems"[MeSH Terms] OR "CRISPR"[tiab] OR "gene editing"[tiab])',
     },
     # Populations
+    "young people": {
+        "mesh": ["Young Adult", "Adolescent"],
+        "clinical": ["Young Adults", "Young Patients", "Early-Onset Cohort"],
+        "facet": "population",
+        "query_part": '("Young Adult"[MeSH Terms] OR "young people"[tiab] OR "young adult"[tiab] OR "young adults"[tiab])',
+    },
+    "young adults": {
+        "mesh": ["Young Adult"],
+        "clinical": ["Young Adults", "Early-Onset Cohort"],
+        "facet": "population",
+        "query_part": '("Young Adult"[MeSH Terms] OR "young adult"[tiab] OR "young adults"[tiab])',
+    },
     "old people": {
         "mesh": ["Aged", "Geriatrics", "Aged, 80 and over"],
         "clinical": ["Elderly Patients", "Geriatric Cohort", "Aging Population"],
@@ -320,6 +344,23 @@ def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str],
     if part not in query_blocks:
       query_blocks.append(part)
 
+  stop_words = {
+      "a", "an", "and", "are", "can", "could", "do", "does", "for", "how",
+      "in", "is", "of", "the", "to", "what", "with", "help", "from", "many",
+      "some", "such", "than", "that", "this", "these", "those",
+  }
+
+  # Identify residual words not covered by the medical dictionary
+  unmatched_words = [
+      cleaned for w in user_query.split()
+      if len(w) > 2
+      and (cleaned := re.sub(r"[^\w\s-]", "", w).lower()) not in stop_words
+      and not any(span[0] <= q_lower.find(cleaned) < span[1] for span in matched_spans)
+  ]
+  if unmatched_words and query_blocks:
+    residual_clause = " OR ".join(f'"{w}"[tiab]' for w in unmatched_words[:4])
+    query_blocks.append(f"({residual_clause})")
+
   if query_blocks:
     final_bool = " AND ".join(
         f"({block})"
@@ -329,10 +370,6 @@ def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str],
     )
   else:
     # Safe generic PubMed translation for unrecognized terms
-    stop_words = {
-        "a", "an", "and", "are", "can", "could", "do", "does", "for", "how",
-        "in", "is", "of", "the", "to", "what", "with",
-    }
     clean_words = [
         cleaned for word in user_query.split()
         if len(word) > 2
