@@ -104,6 +104,7 @@ with left:
 
     # ── Reset Session ─────────────────────────────────────
     if st.button("🗑 Reset Session", use_container_width=True):
+        st.cache_data.clear()
         st.session_state.results = None
         st.session_state.chat    = []
         st.session_state.query   = ""

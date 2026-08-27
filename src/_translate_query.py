@@ -561,7 +561,6 @@ def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str],
 
 
 # --- 3. MAIN TRANSLATION & CLINICAL FACET EXTRACTION ENGINE ---
-@st.cache_data(ttl=3600, show_spinner=False)
 def translate_to_mesh_query(user_query: str, use_llm: bool = True, fast_mode: bool = False) -> dict:
   """Translates natural language questions into structured clinical facets and a validated PubMed Boolean query.
 
