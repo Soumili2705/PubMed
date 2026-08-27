@@ -81,6 +81,36 @@ MEDICAL_DICTIONARY: dict[str, dict] = {
         "query_part": '("Melanoma"[MeSH Terms] OR "melanoma"[tiab] OR "cutaneous melanoma"[tiab])',
     },
     # Cardiovascular & Respiratory
+    "stroke": {
+        "mesh": ["Stroke", "Ischemic Stroke", "Brain Ischemia"],
+        "clinical": ["Cerebrovascular Accident", "Cryptogenic Stroke", "Early-Onset Stroke"],
+        "facet": "condition",
+        "query_part": '("Stroke"[MeSH Terms] OR "ischemic stroke"[tiab] OR "stroke"[tiab] OR "cerebrovascular accident"[tiab])',
+    },
+    "hypertension": {
+        "mesh": ["Hypertension", "Blood Pressure"],
+        "clinical": ["High Blood Pressure", "Arterial Hypertension", "Essential Hypertension"],
+        "facet": "condition",
+        "query_part": '("Hypertension"[MeSH Terms] OR "hypertension"[tiab] OR "high blood pressure"[tiab])',
+    },
+    "low back pain": {
+        "mesh": ["Low Back Pain", "Back Pain"],
+        "clinical": ["Chronic Low Back Pain", "Lumbago", "Lumbar Pain"],
+        "facet": "condition",
+        "query_part": '("Low Back Pain"[MeSH Terms] OR "low back pain"[tiab] OR "back pain"[tiab])',
+    },
+    "pancreatic cancer": {
+        "mesh": ["Pancreatic Neoplasms", "Adenocarcinoma"],
+        "clinical": ["Pancreatic Ductal Adenocarcinoma", "Pancreatic Carcinoma", "Pancreatic Oncology"],
+        "facet": "condition",
+        "query_part": '("Pancreatic Neoplasms"[MeSH Terms] OR "pancreatic cancer"[tiab] OR "pancreatic carcinoma"[tiab])',
+    },
+    "osteoporosis": {
+        "mesh": ["Osteoporosis", "Bone Density"],
+        "clinical": ["Postmenopausal Osteoporosis", "Bone Mineral Density Loss", "Osteoporotic Fractures"],
+        "facet": "condition",
+        "query_part": '("Osteoporosis"[MeSH Terms] OR "osteoporosis"[tiab] OR "bone density loss"[tiab])',
+    },
     "heart attack": {
         "mesh": ["Myocardial Infarction", "Coronary Artery Disease", "Troponin"],
         "clinical": ["Acute Myocardial Infarction (AMI)", "Acute Coronary Syndrome", "ST-Elevation MI"],
@@ -288,7 +318,10 @@ STOP_WORDS = {
     "the", "to", "was", "were", "what", "when", "where", "which", "who",
     "whom", "whose", "why", "with", "help", "many", "some", "such",
     "than", "that", "this", "these", "those", "affect", "affects", "influence",
-    "influences", "causing", "causes", "caused",
+    "influences", "causing", "causes", "caused", "increase", "increases",
+    "increasing", "increased", "decrease", "decreases", "decreasing", "decreased",
+    "lead", "leads", "leading", "prevent", "prevents", "preventing", "prevention",
+    "reduce", "reduces", "reducing", "reduced",
 }
 
 # ---------------------------------------------------------------------------
@@ -303,13 +336,15 @@ RESEARCH_INTENT_BLOCKLIST: set[str] = {
     "treatment", "treatments", "diagnosis", "prognosis", "prevention",
     "management", "screening", "pathophysiology", "epidemiology",
     "underlying causes", "early detection", "early diagnosis",
+    "risk", "risks", "factors", "factor",
 }
 
 # Extended stop-words for entity recovery (includes research-intent words
-# themselves so they are skipped during noun extraction)
+# and population terms so they are skipped during disease noun extraction)
 _RECOVERY_SKIP: set[str] = STOP_WORDS | RESEARCH_INTENT_BLOCKLIST | {
-    "are", "is", "the", "what", "for", "type", "options", "factors",
-    "options", "risk",
+    "are", "is", "the", "what", "for", "type", "types", "options", "option",
+    "factors", "factor", "risk", "risks", "young", "adult", "adults", "old",
+    "elderly", "children", "child", "pediatric", "people", "patient", "patients",
 }
 
 
@@ -543,8 +578,20 @@ def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str],
       and not any(span[0] <= q_lower.find(cleaned) < span[1] for span in matched_spans)
   ]
 
-  # Generate Boolean query directly from normalized facet concepts (Residual words are NOT appended)
+  # Generate Boolean query directly from normalized facet concepts
   final_bool = build_boolean_from_facet_concepts(facet_groups)
+
+  # If condition facet was not matched in dictionary, but residual unmapped disease words exist:
+  if not facet_groups.get("condition") and unmatched_words:
+    clean_unmatched = [w for w in unmatched_words if w.lower() not in _RECOVERY_SKIP]
+    if clean_unmatched:
+      cond_tiab = " AND ".join(f'"{w}"[tiab]' for w in clean_unmatched[:4])
+      if final_bool:
+        final_bool = f"({cond_tiab}) AND {final_bool}"
+      else:
+        final_bool = cond_tiab
+      if not facets.get("condition"):
+        facets["condition"] = " ".join(clean_unmatched[:3]).title()
 
   if not final_bool:
     clean_words = [
