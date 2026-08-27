@@ -730,10 +730,15 @@ RESPOND WITH ONLY A JSON OBJECT:
     except Exception:
       pass
 
+  # 2a. Re-apply guardrail on LLM-extracted facets
+  facets, generated_pubmed_query = _validate_and_repair_facets(
+      q_clean, facets, generated_pubmed_query
+  )
+
   # 3. Final Validation & Sanity Check
   is_valid, final_query = validate_pubmed_query(generated_pubmed_query)
   if not is_valid or not final_query:
-    final_query = rule_query
+    final_query = generated_pubmed_query if validate_pubmed_query(generated_pubmed_query)[0] else rule_query
     validation_status = "fallback_rule_based"
 
   # Ensure default concepts exist for UI rendering (extract from query if dictionary missed)
@@ -763,6 +768,9 @@ RESPOND WITH ONLY A JSON OBJECT:
       facets["intent"] = "Clinical Management & Guidelines"
     else:
       facets["intent"] = "Targeted Literature Discovery"
+
+  # 3a. Final guardrail sweep
+  facets, final_query = _validate_and_repair_facets(q_clean, facets, final_query)
 
   return {
       "pubmed_query": final_query,
