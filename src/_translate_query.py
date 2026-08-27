@@ -288,6 +288,140 @@ STOP_WORDS = {
     "some", "such", "than", "that", "this", "these", "those"
 }
 
+# ---------------------------------------------------------------------------
+# VALIDATION GUARDRAIL — research-intent contamination detection & recovery
+# ---------------------------------------------------------------------------
+# Words that describe the *type* of research question, not the disease itself.
+# If the Condition or Outcome field is set to one of these values it means the
+# dictionary matched the research-intent word from the query instead of the
+# actual biomedical entity.  We must recover the real entity from the query.
+RESEARCH_INTENT_BLOCKLIST: set[str] = {
+    "etiology", "risk factors", "risk factor", "causality", "causes", "cause",
+    "treatment", "treatments", "diagnosis", "prognosis", "prevention",
+    "management", "screening", "pathophysiology", "epidemiology",
+    "underlying causes", "early detection", "early diagnosis",
+}
+
+# Extended stop-words for entity recovery (includes research-intent words
+# themselves so they are skipped during noun extraction)
+_RECOVERY_SKIP: set[str] = STOP_WORDS | RESEARCH_INTENT_BLOCKLIST | {
+    "are", "is", "the", "what", "for", "type", "options", "factors",
+    "options", "risk",
+}
+
+
+def _recover_biomedical_entity(user_query: str) -> tuple[str | None, str | None]:
+    """Extract a candidate biomedical entity from the query when the normal
+    extraction pipeline has been contaminated by a research-intent keyword.
+
+    Strategy (rule-based, no LLM):
+    1. Tokenise the query.
+    2. Skip stop-words, research-intent words, and tokens shorter than 3 chars.
+    3. Collect the remaining noun-like tokens (they are the disease / condition).
+    4. Build a simple [tiab] query from those tokens.
+
+    Returns (entity_label, tiab_pubmed_query) or (None, None) if recovery fails.
+    """
+    tokens = re.findall(r"[a-zA-Z0-9'-]+", user_query.lower())
+    candidate_tokens = [
+        t for t in tokens
+        if len(t) >= 3 and t not in _RECOVERY_SKIP
+    ]
+    if not candidate_tokens:
+        return None, None
+
+    entity_label = " ".join(candidate_tokens[:3]).title()
+    tiab_query = " AND ".join(f'"{t}"[tiab]' for t in candidate_tokens[:4])
+    return entity_label, tiab_query
+
+
+def _validate_and_repair_facets(
+    user_query: str,
+    facets: dict,
+    generated_pubmed_query: str,
+) -> tuple[dict, str]:
+    """Guardrail applied immediately after extraction.
+
+    Detects when the Condition or Outcome field contains a research-intent word
+    (from RESEARCH_INTENT_BLOCKLIST) and replaces it with the actual biomedical
+    entity recovered from the original query.  The research-intent term is
+    preserved in the Intent field so no information is lost.
+
+    Bug pattern caught:
+      - A research-intent word from the query (e.g. "causes", "etiology")
+        matched a dictionary entry and occupied the Outcome field.
+      - The actual disease (e.g. "hypertension") was not in the dictionary and
+        therefore produced no condition match (condition=None).
+      - The resulting Boolean query searches only for research-intent concepts
+        (Etiology, Risk Factors) with no disease constraint → completely
+        irrelevant PubMed results.
+
+    Only modifies ``facets`` and ``generated_pubmed_query``; does not touch
+    ranking, retrieval, embeddings, or any other pipeline component.
+
+    Returns: (repaired_facets, repaired_pubmed_query)
+    """
+    condition_val = (facets.get("condition") or "").strip().lower()
+    outcome_val   = (facets.get("outcome_or_intent") or "").strip().lower()
+
+    condition_contaminated = condition_val in RESEARCH_INTENT_BLOCKLIST
+    outcome_contaminated   = outcome_val in RESEARCH_INTENT_BLOCKLIST
+
+    if not condition_contaminated and not outcome_contaminated:
+        # Nothing to fix — return as-is
+        return facets, generated_pubmed_query
+
+    # Preserve the research-intent term in the Intent field before clearing it
+    contaminating_term = facets.get("condition") or facets.get("outcome_or_intent") or ""
+    if contaminating_term and not facets.get("intent"):
+        facets["intent"] = contaminating_term.title()
+
+    # Attempt entity recovery from original query
+    entity_label, recovery_query = _recover_biomedical_entity(user_query)
+
+    # Record whether condition was None/empty before repair (used in both
+    # the outcome branch and the query-replacement logic below)
+    no_condition_before = not condition_val  # condition was None/empty before guardrail ran
+
+    if condition_contaminated:
+        # Replace the contaminating condition value with the recovered entity
+        facets["condition"] = entity_label  # may be None if recovery failed
+
+    if outcome_contaminated:
+        # The outcome was a research-intent word; clear it — intent is
+        # already preserved in the intent field above
+        facets["outcome_or_intent"] = None
+        # If condition was also empty (never set), assign the recovered entity
+        # here so the UI has a meaningful Condition label and the downstream
+        # late-stage fallback doesn't re-populate it with a research-intent MeSH term
+        if no_condition_before and entity_label:
+            facets["condition"] = entity_label
+
+    # Replace the Boolean query when a disease-free, intent-only query was
+    # generated.  Two triggering situations:
+    #
+    # Case A: condition field was contaminated (its previous value was a
+    #   research-intent word).  After repair the condition is now set to the
+    #   recovered entity, so the old query no longer reflects reality.
+    #
+    # Case B: condition was None (no disease matched the dictionary) AND
+    #   outcome was contaminated (only a research-intent word matched).
+    #   This means the entire Boolean query was built from research-intent
+    #   terms — there is no disease constraint at all — so the query is
+    #   guaranteed to return irrelevant results.
+    #
+    # In both cases replace with the recovery [tiab] query when available.
+    should_replace_query = recovery_query and (
+        condition_contaminated
+        or (outcome_contaminated and no_condition_before)
+    )
+    if should_replace_query:
+        generated_pubmed_query = recovery_query
+
+    return facets, generated_pubmed_query
+
+
+
 
 def build_boolean_from_facet_concepts(facet_groups: dict[str, list[dict]]) -> str:
   """Constructs a syntax-valid PubMed Boolean query where:
@@ -497,8 +631,18 @@ def translate_to_mesh_query(user_query: str, use_llm: bool = True, fast_mode: bo
   generated_pubmed_query = rule_query
   validation_status = "rule_based"
 
+  # 1a. Guardrail: detect and repair research-intent contamination in facets.
+  #     If the Condition or Outcome field was set to a research-intent word
+  #     (e.g. "Etiology", "Risk Factors") instead of the actual disease,
+  #     recover the biomedical entity from the original query and move the
+  #     research-intent term to the Intent field where it belongs.
+  facets, generated_pubmed_query = _validate_and_repair_facets(
+      q_clean, facets, generated_pubmed_query
+  )
+
   # 2. Trigger LLM fallback if there are concepts not recognized by the dictionary
   should_call_llm = use_llm and bool(unmatched_words or not rule_mesh)
+
 
   if should_call_llm and api_key and api_key.strip():
     unresolved_str = ", ".join(unmatched_words) if unmatched_words else "None"
