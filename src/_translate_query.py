@@ -283,9 +283,12 @@ def validate_pubmed_query(query: str) -> tuple[bool, str]:
 
 
 STOP_WORDS = {
-    "a", "an", "and", "are", "can", "could", "do", "does", "for", "how",
-    "in", "is", "of", "the", "to", "what", "with", "help", "from", "many",
-    "some", "such", "than", "that", "this", "these", "those"
+    "a", "an", "and", "are", "can", "could", "did", "do", "does", "for",
+    "from", "had", "has", "have", "how", "in", "is", "of", "on", "or",
+    "the", "to", "was", "were", "what", "when", "where", "which", "who",
+    "whom", "whose", "why", "with", "help", "many", "some", "such",
+    "than", "that", "this", "these", "those", "affect", "affects", "influence",
+    "influences", "causing", "causes", "caused",
 }
 
 # ---------------------------------------------------------------------------
@@ -532,17 +535,11 @@ def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str],
           facets["outcome_or_intent"] = mapping["clinical"][0] if mapping.get("clinical") else phrase.title()
       start_pos = end_idx
 
-  stop_words = {
-      "a", "an", "and", "are", "can", "could", "do", "does", "for", "how",
-      "in", "is", "of", "the", "to", "what", "with", "help", "from", "many",
-      "some", "such", "than", "that", "this", "these", "those",
-  }
-
   # Identify residual words not covered by the medical dictionary
   unmatched_words = [
       cleaned for w in user_query.split()
       if len(w) > 2
-      and (cleaned := re.sub(r"[^\w\s-]", "", w).lower()) not in stop_words
+      and (cleaned := re.sub(r"[^\w\s-]", "", w).lower()) not in STOP_WORDS
       and not any(span[0] <= q_lower.find(cleaned) < span[1] for span in matched_spans)
   ]
 
@@ -553,7 +550,7 @@ def _build_rule_based_query(user_query: str) -> tuple[str, list[str], list[str],
     clean_words = [
         cleaned for word in user_query.split()
         if len(word) > 2
-        and (cleaned := re.sub(r"[^\w\s-]", "", word).lower()) not in stop_words
+        and (cleaned := re.sub(r"[^\w\s-]", "", word).lower()) not in _RECOVERY_SKIP
     ]
     if clean_words:
       final_bool = " AND ".join(f'"{w}"[tiab]' for w in clean_words[:6])
@@ -742,14 +739,21 @@ RESPOND WITH ONLY A JSON OBJECT:
 
   # Ensure default concepts exist for UI rendering (extract from query if dictionary missed)
   if not matched_mesh:
-    words = [w.title() for w in re.findall(r'[a-zA-Z]{3,}', q_clean)]
+    words = [
+        w.title() for w in re.findall(r'[a-zA-Z0-9\'-]{3,}', q_clean)
+        if w.lower() not in _RECOVERY_SKIP
+    ]
     matched_mesh = words[:3] if words else ["Biomedical Research", "Clinical Medicine"]
   if not matched_clinical:
     matched_clinical = [f"{m} Therapy" for m in matched_mesh[:2]] if matched_mesh else ["Evidence-Based Medicine", "Clinical Outcomes"]
 
   # Infer missing facets if empty
-  if not facets.get("condition") and matched_mesh:
-    facets["condition"] = matched_mesh[0]
+  if not facets.get("condition"):
+    recovered_cond, _ = _recover_biomedical_entity(q_clean)
+    if recovered_cond:
+      facets["condition"] = recovered_cond
+    elif matched_mesh and matched_mesh[0].lower() not in _RECOVERY_SKIP:
+      facets["condition"] = matched_mesh[0]
   if not facets.get("intent"):
     q_low = q_clean.lower()
     if any(w in q_low for w in ["biomarker", "early", "detect", "screen"]):
