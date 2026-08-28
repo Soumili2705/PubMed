@@ -62,9 +62,9 @@ def _call_groq(system_prompt: str, user_prompt: str, models: list[str], max_toke
     return None
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
 def generate_summary(query: str, papers: list[dict], fast_mode: bool = True) -> str:
     """Synthesizes an evidence-grounded clinical briefing strictly from retrieved abstracts."""
+
     if not papers:
         return "No candidate papers available for clinical synthesis."
 

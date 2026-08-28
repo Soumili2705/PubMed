@@ -28,11 +28,13 @@ def search_pubmed(query: str, max_results: int = 15) -> list[str]:
         "db": "pubmed",
         "term": term,
         "retmode": "json",
-        "retmax": max(max_results * 2, 20),
+        "retmax": max(max_results, 10),
         "sort": "relevance",
     }
     if email := os.getenv("NCBI_EMAIL"):
         params["email"] = email
+    if api_key := os.getenv("NCBI_API_KEY", "").strip():
+        params["api_key"] = api_key
 
     try:
         response = requests.get(PUBMED_SEARCH_URL, params=params, timeout=DEFAULT_TIMEOUT)
@@ -52,6 +54,8 @@ def _fetch_papers_cached(pmids: tuple[str, ...]) -> list[dict]:
     params = {"db": "pubmed", "id": ",".join(pmids), "retmode": "xml"}
     if email := os.getenv("NCBI_EMAIL"):
         params["email"] = email
+    if api_key := os.getenv("NCBI_API_KEY", "").strip():
+        params["api_key"] = api_key
 
     try:
         response = requests.get(PUBMED_FETCH_URL, params=params, timeout=DEFAULT_TIMEOUT)
